@@ -44,7 +44,7 @@ pub fn list_devices(runner: &dyn CommandRunner, tools: &Tools) -> Result<Vec<Str
         return Err(IngestError::ToolFailed {
             tool: "idevice_id",
             status: "non-zero exit".to_string(),
-            stderr: output.stderr,
+            stderr: fallback_detail(output.stderr, &stdout_lines),
         });
     }
 
@@ -102,7 +102,9 @@ pub fn create_or_refresh_backup(
         .map(|password| vec![("BACKUP_PASSWORD", password)])
         .unwrap_or_default();
 
+    let mut stdout_lines = Vec::new();
     let output = runner.run(&tools.idevicebackup2, &args, &envs, &mut |line| {
+        stdout_lines.push(line.to_string());
         if let Some(percent) = parse_progress_line(line) {
             on_progress(percent);
         }
@@ -112,11 +114,24 @@ pub fn create_or_refresh_backup(
         return Err(IngestError::ToolFailed {
             tool: "idevicebackup2",
             status: "non-zero exit".to_string(),
-            stderr: output.stderr,
+            stderr: fallback_detail(output.stderr, &stdout_lines),
         });
     }
 
     Ok(backup_root.join(udid))
+}
+
+/// `idevice_id`/`idevicebackup2` often write their actual error text to
+/// stdout rather than stderr (they're primarily progress-bar tools, not
+/// well-behaved Unix citizens) - falling back to stdout when stderr is
+/// empty avoids surfacing a blank, useless error message on a real
+/// failure.
+fn fallback_detail(stderr: String, stdout_lines: &[String]) -> String {
+    if !stderr.trim().is_empty() {
+        stderr
+    } else {
+        stdout_lines.join("\n")
+    }
 }
 
 /// Extracts a `NN%` (or `NN.N%`) progress percentage from one line of
@@ -401,6 +416,37 @@ mod tests {
             |_| {},
         );
         assert!(matches!(result, Err(IngestError::ToolFailed { .. })));
+    }
+
+    #[test]
+    fn create_or_refresh_backup_falls_back_to_stdout_when_stderr_is_empty() {
+        // idevicebackup2 often writes its actual error to stdout, not
+        // stderr - a blank stderr on failure shouldn't produce a blank
+        // error message.
+        let runner = FakeCommandRunner {
+            stdout_lines: vec![
+                "ERROR: Could not start service com.apple.mobilebackup2.".to_string()
+            ],
+            success: false,
+            stderr: String::new(),
+            last_call: Mutex::new(None),
+        };
+        let backup_root = tempfile::tempdir().unwrap();
+
+        let result = create_or_refresh_backup(
+            &runner,
+            &tools(),
+            "UDID123",
+            backup_root.path(),
+            None,
+            |_| {},
+        );
+        match result {
+            Err(IngestError::ToolFailed { stderr, .. }) => {
+                assert!(stderr.contains("Could not start service"));
+            }
+            other => panic!("expected ToolFailed with stdout fallback, got {other:?}"),
+        }
     }
 
     #[test]
