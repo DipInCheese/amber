@@ -109,6 +109,12 @@ body {
   color: #ff453a;
 }
 
+.conversation-view {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .thread-scroll {
   flex: 1;
   overflow-y: auto;
@@ -267,4 +273,68 @@ body {
   color: inherit;
   text-decoration: underline;
   font-size: 13px;
+}
+
+/* Timeline scrubber (M4) */
+
+.timeline-scrubber {
+  position: relative;
+  width: 52px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+}
+
+.timeline-track {
+  position: absolute;
+  inset: 12px 0;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.timeline-tick-month {
+  position: absolute;
+  right: 6px;
+  width: 6px;
+  height: 1px;
+  background: var(--border);
+  transform: translateY(-50%);
+}
+
+.timeline-tick-year {
+  position: absolute;
+  right: 6px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.timeline-tick-year-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.timeline-current {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.timeline-drag-label {
+  position: absolute;
+  right: 100%;
+  margin-right: 8px;
+  transform: translateY(-50%);
+  background: var(--text);
+  color: var(--bg);
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
 }

@@ -2,15 +2,20 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useState } from "react";
 import "./App.css";
-import { openArchive, queryMessages } from "./lib/api";
-import type { MessageDto, OpenArchiveResult } from "./lib/types";
-import { ThreadView } from "./thread/ThreadView";
+import { ConversationView } from "./ConversationView";
+import { getDayIndex, openArchive, queryMessages } from "./lib/api";
+import type { DayBucketDto, MessageDto, OpenArchiveResult } from "./lib/types";
 
 type LoadState =
   | { status: "empty" }
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; conversation: OpenArchiveResult; messages: MessageDto[] };
+  | {
+      status: "ready";
+      conversation: OpenArchiveResult;
+      messages: MessageDto[];
+      dayBuckets: DayBucketDto[];
+    };
 
 function App() {
   const [state, setState] = useState<LoadState>({ status: "empty" });
@@ -25,8 +30,8 @@ function App() {
     setState({ status: "loading" });
     try {
       const conversation = await openArchive(path);
-      const messages = await queryMessages();
-      setState({ status: "ready", conversation, messages });
+      const [messages, dayBuckets] = await Promise.all([queryMessages(), getDayIndex()]);
+      setState({ status: "ready", conversation, messages, dayBuckets });
     } catch (err) {
       setState({ status: "error", message: String(err) });
     }
@@ -57,7 +62,11 @@ function App() {
           <div className="placeholder placeholder-error">Couldn't open archive: {state.message}</div>
         )}
         {state.status === "ready" && (
-          <ThreadView messages={state.messages} isGroup={state.conversation.is_group} />
+          <ConversationView
+            messages={state.messages}
+            dayBuckets={state.dayBuckets}
+            isGroup={state.conversation.is_group}
+          />
         )}
       </main>
     </div>

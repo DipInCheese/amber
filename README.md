@@ -89,7 +89,9 @@ Building in order; each milestone lands as its own set of commits.
 - [x] **M3 — viewer:** virtualized iMessage-style thread from a `.amber` -
       bubbles, date separators, timestamps, emoji, inline photos/video,
       reactions, edited/unsent/reply indicators.
-- [ ] **M4 — timeline scrubber.**
+- [x] **M4 — timeline scrubber.** Draggable, Photos-style vertical timeline
+      with month/year ticks; position maps linearly to calendar date, jumps
+      the virtualized thread instantly, and stays in sync as you scroll.
 - [ ] **M5 — plug-and-play device ingest.**
 - [ ] **M6 — package & ship installers** for macOS and Windows.
 
@@ -115,7 +117,7 @@ LiveMac: copy chat.db        Writer (amber-format) ──> .amber bundle
 | [`amber-format`](crates/amber-format) | `.amber` reader/writer per [`SPEC.md`](SPEC.md). |
 | [`amber-ingest`](crates/amber-ingest) | Resolves a device/backup/live-Mac source to a database. |
 | [`src-tauri`](src-tauri) | The desktop app shell: Tauri commands, the `amber-attachment` protocol, window/bundle config. |
-| [`src`](src) | The React viewer: virtualized thread, bubbles, timeline scrubber (M4). |
+| [`src`](src) | The React viewer: virtualized thread, bubbles, timeline scrubber. |
 
 ## Credits
 

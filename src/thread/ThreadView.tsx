@@ -1,20 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import type { MessageDto } from "../lib/types";
 import { DateSeparator } from "./DateSeparator";
 import { MessageBubble } from "./MessageBubble";
-import { buildThreadRows } from "./rows";
+import { buildThreadRows, findRowIndexForTimestamp, rowTimestamp } from "./rows";
 
-export function ThreadView({
-  messages,
-  isGroup,
-}: {
-  messages: MessageDto[];
-  isGroup: boolean;
-}) {
+export interface ThreadViewHandle {
+  /** Scrolls so the first row at or after `tsUnixMs` is at the top. Used by the timeline scrubber. */
+  scrollToDate: (tsUnixMs: number) => void;
+}
+
+export const ThreadView = forwardRef<
+  ThreadViewHandle,
+  {
+    messages: MessageDto[];
+    isGroup: boolean;
+    /** Called with the timestamp of the topmost visible row whenever it changes, so the scrubber can track scroll position. */
+    onVisibleDateChange?: (tsUnixMs: number) => void;
+  }
+>(function ThreadView({ messages, isGroup, onVisibleDateChange }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const rows = buildThreadRows(messages);
+  const rows = useMemo(() => buildThreadRows(messages), [messages]);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -25,6 +32,29 @@ export function ThreadView({
     overscan: 12,
     getItemKey: (index) => rows[index].key,
   });
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollToDate: (tsUnixMs: number) => {
+        const index = findRowIndexForTimestamp(rows, tsUnixMs);
+        virtualizer.scrollToIndex(index, { align: "start" });
+      },
+    }),
+    [rows, virtualizer],
+  );
+
+  // `range` is the actually-visible index span, distinct from
+  // `getVirtualItems()` which also includes the overscan padding - using
+  // the latter would report the overscanned-above row as "visible" and
+  // make the scrubber's position indicator lag behind the real scroll.
+  const topVisibleIndex = virtualizer.range?.startIndex;
+
+  useEffect(() => {
+    if (topVisibleIndex === undefined || !onVisibleDateChange) return;
+    const row = rows[topVisibleIndex];
+    if (row) onVisibleDateChange(rowTimestamp(row));
+  }, [topVisibleIndex, rows, onVisibleDateChange]);
 
   return (
     <div className="thread-scroll" ref={scrollRef}>
@@ -63,4 +93,4 @@ export function ThreadView({
       </div>
     </div>
   );
-}
+});

@@ -37,3 +37,28 @@ export function buildThreadRows(messages: MessageDto[]): ThreadRow[] {
 
   return rows;
 }
+
+export function rowTimestamp(row: ThreadRow): number {
+  return row.kind === "date" ? row.tsUnixMs : row.message.ts_unix_ms;
+}
+
+/**
+ * Index of the first row at or after `targetTsUnixMs` (binary search - rows
+ * are chronological). Used by the timeline scrubber to jump the virtualized
+ * list to a date. Returns the last index if every row is before the target.
+ */
+export function findRowIndexForTimestamp(rows: ThreadRow[], targetTsUnixMs: number): number {
+  if (rows.length === 0) return 0;
+
+  let lo = 0;
+  let hi = rows.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (rowTimestamp(rows[mid]) < targetTsUnixMs) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}

@@ -14,6 +14,12 @@ const timeFormatter = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
 });
 
+const monthYearFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "long",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
 /** Local calendar-day key (e.g. "2024-03-05"), for grouping into date separators. */
 export function localDayKey(tsUnixMs: number): string {
   const d = new Date(tsUnixMs);
@@ -28,4 +34,9 @@ export function formatDateSeparator(tsUnixMs: number): string {
 
 export function formatTime(tsUnixMs: number): string {
   return timeFormatter.format(new Date(tsUnixMs));
+}
+
+/** Formatted in UTC deliberately: the timeline scrubber's own date math (timelineMath.ts) works in UTC calendar days, matching how the backend buckets day_index - keeps the label consistent with where the thumb actually lands. */
+export function formatMonthYear(tsUnixMs: number): string {
+  return monthYearFormatter.format(new Date(tsUnixMs));
 }
