@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useState } from "react";
 import {
   beginIngest,
@@ -25,13 +26,28 @@ type Phase =
   | { step: "writing" }
   | { step: "error"; message: string };
 
-function PrerequisiteRow({ label, ok, guidance }: { label: string; ok: boolean; guidance: string | null }) {
+function PrerequisiteRow({
+  label,
+  ok,
+  guidance,
+  remediationUrl,
+}: {
+  label: string;
+  ok: boolean;
+  guidance: string | null;
+  remediationUrl: string | null;
+}) {
   return (
     <div className={`prereq-row ${ok ? "prereq-ok" : "prereq-missing"}`}>
       <span className="prereq-icon">{ok ? "✓" : "✕"}</span>
       <div>
         <div className="prereq-label">{label}</div>
         {!ok && guidance && <div className="prereq-guidance">{guidance}</div>}
+        {!ok && remediationUrl && (
+          <button type="button" className="prereq-fix" onClick={() => openUrl(remediationUrl)}>
+            Fix it
+          </button>
+        )}
       </div>
     </div>
   );
@@ -153,16 +169,19 @@ export function ImportPanel({
                   label="idevice_id"
                   ok={prereqs.idevice_id.ok}
                   guidance={prereqs.idevice_id.guidance}
+                  remediationUrl={prereqs.idevice_id.remediation_url}
                 />
                 <PrerequisiteRow
                   label="idevicebackup2"
                   ok={prereqs.idevicebackup2.ok}
                   guidance={prereqs.idevicebackup2.guidance}
+                  remediationUrl={prereqs.idevicebackup2.remediation_url}
                 />
                 <PrerequisiteRow
                   label="USB driver"
                   ok={prereqs.platform.ok}
                   guidance={prereqs.platform.guidance}
+                  remediationUrl={prereqs.platform.remediation_url}
                 />
               </>
             )}

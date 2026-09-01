@@ -11,9 +11,12 @@ use crate::device::Tools;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrerequisiteStatus {
     Ok,
-    /// Not met, with user-facing guidance on how to fix it.
+    /// Not met, with user-facing guidance on how to fix it and, where a
+    /// single click can get the user there (e.g. straight to the right
+    /// Microsoft Store listing), a URL to open.
     Missing {
         guidance: String,
+        remediation_url: Option<String>,
     },
 }
 
@@ -67,6 +70,7 @@ fn check_tool_present(runner: &dyn CommandRunner, name: &str, path: &Path) -> Pr
             guidance: format!(
                 "{name} isn't available. Reinstalling Amber should restore it if this is a bundled build; for local development, install libimobiledevice and make sure {name} is on PATH."
             ),
+            remediation_url: None,
         },
     }
 }
@@ -76,6 +80,7 @@ fn check_platform_driver(_runner: &dyn CommandRunner) -> PrerequisiteStatus {
     let Some(home) = dirs::home_dir() else {
         return PrerequisiteStatus::Missing {
             guidance: "Could not determine your home directory.".to_string(),
+            remediation_url: None,
         };
     };
     let chat_db = home.join("Library/Messages/chat.db");
@@ -87,6 +92,10 @@ fn check_platform_driver(_runner: &dyn CommandRunner) -> PrerequisiteStatus {
                 guidance: "Amber needs Full Disk Access to read Messages. Go to System \
                     Settings > Privacy & Security > Full Disk Access, and turn Amber on."
                     .to_string(),
+                remediation_url: Some(
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+                        .to_string(),
+                ),
             }
         }
         // Not found just means "no Messages history yet" or this isn't the
@@ -98,10 +107,15 @@ fn check_platform_driver(_runner: &dyn CommandRunner) -> PrerequisiteStatus {
 #[cfg(target_os = "windows")]
 fn check_platform_driver(runner: &dyn CommandRunner) -> PrerequisiteStatus {
     let missing = PrerequisiteStatus::Missing {
-        guidance: "Amber needs Apple's Mobile Device USB driver to talk to an iPhone. Install \
-            it via the Apple Devices app (Microsoft Store) or iTunes from apple.com, then \
-            reconnect your phone."
+        guidance: "Amber needs Apple's Mobile Device USB driver to talk to an iPhone. Get the \
+            Apple Devices app from the Microsoft Store, then reconnect your phone."
             .to_string(),
+        // Apple's driver is proprietary and not something Amber can bundle
+        // or install itself (unlike libimobiledevice) - this opens Apple's
+        // own official Microsoft Store listing so it's one click away
+        // instead of a manual search. The user still drives the actual
+        // install through the Store's own UI.
+        remediation_url: Some("ms-windows-store://pdp/?productid=9NP83LWLPZ9K".to_string()),
     };
 
     let mut ignored = String::new();

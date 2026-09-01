@@ -54,6 +54,7 @@ export interface OpenArchiveResult {
 export interface PrerequisiteStatusDto {
   ok: boolean;
   guidance: string | null;
+  remediation_url: string | null;
 }
 
 export interface PrerequisiteReportDto {

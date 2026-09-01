@@ -65,6 +65,7 @@ pub struct OpenArchiveResult {
 pub struct PrerequisiteStatusDto {
     pub ok: bool,
     pub guidance: Option<String>,
+    pub remediation_url: Option<String>,
 }
 
 impl From<amber_ingest::PrerequisiteStatus> for PrerequisiteStatusDto {
@@ -73,10 +74,15 @@ impl From<amber_ingest::PrerequisiteStatus> for PrerequisiteStatusDto {
             amber_ingest::PrerequisiteStatus::Ok => Self {
                 ok: true,
                 guidance: None,
+                remediation_url: None,
             },
-            amber_ingest::PrerequisiteStatus::Missing { guidance } => Self {
+            amber_ingest::PrerequisiteStatus::Missing {
+                guidance,
+                remediation_url,
+            } => Self {
                 ok: false,
                 guidance: Some(guidance),
+                remediation_url,
             },
         }
     }
