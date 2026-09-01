@@ -79,8 +79,7 @@ jobs:
           # configuration and the existing DLL-closure walk below picks up
           # libtatsu-1.0.dll the same way it would any pacman package.
           export PATH="/usr/bin:/mingw64/bin:$PATH"
-          git config --global core.autocrlf false
-          git clone --branch 1.0.5 --depth 1 https://github.com/libimobiledevice/libtatsu.git /tmp/libtatsu
+          git -c core.autocrlf=false clone --branch 1.0.5 --depth 1 https://github.com/libimobiledevice/libtatsu.git /tmp/libtatsu
           cd /tmp/libtatsu
           ./autogen.sh CC=gcc CXX=g++ --prefix=/mingw64
           make
@@ -89,7 +88,7 @@ jobs:
       - name: Build libimobiledevice 1.4.0 from source and resolve the DLL closure
         run: |
           export PATH="/usr/bin:/mingw64/bin:$PATH"
-          git clone --branch 1.4.0 --depth 1 https://github.com/libimobiledevice/libimobiledevice.git /tmp/libimobiledevice
+          git -c core.autocrlf=false clone --branch 1.4.0 --depth 1 https://github.com/libimobiledevice/libimobiledevice.git /tmp/libimobiledevice
           cd /tmp/libimobiledevice
           ./autogen.sh CC=gcc CXX=g++ --prefix=/mingw64
           make
