@@ -96,13 +96,24 @@ jobs:
       - name: Install libimobiledevice (Homebrew)
         run: brew install libimobiledevice
 
-      - name: Collect binaries and relink dylibs to @executable_path
+      - name: Collect binaries and relink dylibs
         run: |
           set -eu
           out="$PWD/sidecar-out"
           mkdir -p "$out"
           PREFIX="$(brew --prefix libimobiledevice)"
 
+          # The two entry points are externalBin sidecars, which Tauri
+          # places in Contents/MacOS/ (next to the main executable) -
+          # `@executable_path` resolves there. Everything they depend on is
+          # a `resources` entry instead (externalBin is for one executable
+          # per logical name, not arbitrary shared libraries), which Tauri
+          # places in Contents/Resources/ - a *different* directory, so the
+          # two executables must reference dylibs via
+          # `@executable_path/../Resources/<dylib>`, not `@executable_path/<dylib>`.
+          # The dylibs sit alongside each other in that same flat Resources
+          # dir, so dylib-to-dylib references use the simpler,
+          # location-relative `@loader_path/<dylib>`.
           worklist="$out/.worklist"
           seenfile="$out/.seen"
           : > "$worklist"
@@ -110,33 +121,43 @@ jobs:
 
           enqueue() {
             base="$(basename "$1")"
+            kind="$2"
             if ! grep -qxF "$base" "$seenfile" 2>/dev/null; then
               echo "$base" >> "$seenfile"
-              echo "$1|$base" >> "$worklist"
+              echo "$1|$base|$kind" >> "$worklist"
             fi
           }
 
-          enqueue "$PREFIX/bin/idevice_id"
-          enqueue "$PREFIX/bin/idevicebackup2"
+          enqueue "$PREFIX/bin/idevice_id" exe
+          enqueue "$PREFIX/bin/idevicebackup2" exe
 
           while [ -s "$worklist" ]; do
             line="$(head -n1 "$worklist")"
             sed -i '' '1d' "$worklist"
             src="${line%%|*}"
-            base="${line##*|}"
+            rest="${line#*|}"
+            base="${rest%%|*}"
+            kind="${rest##*|}"
             dest="$out/$base"
             if [ ! -f "$dest" ]; then
               cp "$src" "$dest"
               chmod +w "$dest"
-              install_name_tool -id "@executable_path/$base" "$dest"
+              if [ "$kind" = "lib" ]; then
+                install_name_tool -id "@loader_path/$base" "$dest"
+              fi
+            fi
+            if [ "$kind" = "exe" ]; then
+              rewrite_prefix="@executable_path/../Resources"
+            else
+              rewrite_prefix="@loader_path"
             fi
             for dep in $(otool -L "$dest" | tail -n +2 | awk '{print $1}'); do
               case "$dep" in
                 /usr/lib/*|/System/*|@rpath/*|@loader_path/*|@executable_path/*) continue ;;
               esac
-              enqueue "$dep"
+              enqueue "$dep" lib
               depbase="$(basename "$dep")"
-              install_name_tool -change "$dep" "@executable_path/$depbase" "$dest"
+              install_name_tool -change "$dep" "$rewrite_prefix/$depbase" "$dest"
             done
           done
           rm -f "$worklist" "$seenfile"
@@ -146,9 +167,18 @@ jobs:
           echo "--- final otool -L check (no /opt/homebrew or /usr/local refs should remain) ---"
           for f in "$out"/*; do echo "$f:"; otool -L "$f"; done
 
-      - name: Smoke test - run the sidecar standalone
+      - name: Smoke test - reproduce the real .app layout and run standalone
         run: |
-          cd sidecar-out
+          set -eu
+          # Mirror Contents/MacOS + Contents/Resources so the
+          # @executable_path/../Resources and @loader_path references
+          # resolve exactly as they will in the installed .app.
+          mkdir -p app-layout/Contents/MacOS app-layout/Contents/Resources
+          cp sidecar-out/idevice_id sidecar-out/idevicebackup2 app-layout/Contents/MacOS/
+          for f in sidecar-out/*.dylib; do
+            cp "$f" app-layout/Contents/Resources/
+          done
+          cd app-layout/Contents/MacOS
           ./idevice_id --version || echo "exit code: $?"
           ./idevicebackup2 --version || echo "exit code: $?"
 
