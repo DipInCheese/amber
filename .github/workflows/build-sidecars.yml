@@ -17,9 +17,11 @@ name: build-sidecars
 # yet). The DLL closure is resolved with a file-based BFS queue over `ldd`
 # output, so transitive dependencies (openssl, zlib, the mingw runtime,
 # ...) are all included regardless of whether they came from pacman or our
-# own source build. Uses MSYS2's bash directly as the step shell (via the
-# `shell:` template) rather than shelling into it from cmd, to avoid
-# nested-quoting bugs.
+# own source build. Uses `msys2/setup-msys2`'s registered `msys2 {0}` shell
+# (MSYSTEM=MINGW64) rather than invoking MSYS2's bash directly - building
+# from source needs autotools to actually detect the mingw-w64 host
+# correctly (see the comment above the Windows steps below for what goes
+# wrong otherwise).
 #
 # macOS: libimobiledevice comes from Homebrew (pre-installed on macos-latest,
 # which is Apple Silicon) - already on 1.4.0, no source build needed there.
@@ -38,47 +40,46 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        shell: 'C:\msys64\usr\bin\bash.exe -e {0}'
+        # Not a raw `C:\msys64\usr\bin\bash.exe` invocation (that's the
+        # native-MSYS shell, MSYSTEM=MSYS) - `msys2/setup-msys2` below
+        # registers a `msys2 {0}` shell that runs inside the MINGW64
+        # subsystem specifically. That distinction matters for autotools:
+        # under plain MSYS, `./configure` detects the host as
+        # `x86_64-pc-msys` (not `x86_64-w64-mingw32`), which makes libtool
+        # decide the target can't build shared libraries at all, and
+        # confuses aclocal's search path enough that `PKG_CHECK_MODULES`
+        # macros come out unexpanded. Confirmed by hitting exactly that
+        # (libtool "checking if libtool supports shared libraries... no",
+        # then a literal `PKG_CHECK_MODULES(libplist, ...)` syntax error)
+        # before switching to this action.
+        shell: msys2 {0}
     steps:
-      - name: Install build toolchain and libimobiledevice's dependencies
-        run: |
-          # Non-login, non-interactive bash.exe skips /etc/profile, so
-          # MSYS2's own directories (where pacman lives) aren't on PATH by
-          # default here - only what the Windows environment already had.
-          export PATH="/usr/bin:/mingw64/bin:$PATH"
-          pacman -Sy --noconfirm
-          # NOT mingw-w64-x86_64-libimobiledevice itself - MSYS2's package
-          # is pinned to upstream's last tagged release, 1.3.0 (2020), which
-          # has a long-standing, still-open compatibility bug with the
-          # backup protocol on modern iOS ("Could not perform backup
-          # protocol version exchange, error code -1" - see
-          # https://github.com/libimobiledevice/libimobiledevice/issues/1115
-          # and similar). Upstream cut a new 1.4.0 release in Oct 2025 with
-          # explicit "Fixes for idevicebackup2", but MSYS2's package repo
-          # hasn't picked it up - so libimobiledevice itself gets built
-          # from source below, from the real 1.4.0 tag. Everything it
-          # depends on (checked against Homebrew's already-1.4.0-compatible
-          # versions) is already fresh enough as a regular package: libplist
-          # 2.7.0, libimobiledevice-glue 1.3.2, libusbmuxd 2.1.1.
-          pacman -S --noconfirm \
-            git make libtool autoconf automake-wrapper \
-            mingw-w64-x86_64-gcc \
-            mingw-w64-x86_64-pkg-config \
-            mingw-w64-x86_64-openssl \
-            mingw-w64-x86_64-libplist \
-            mingw-w64-x86_64-libimobiledevice-glue \
-            mingw-w64-x86_64-libusbmuxd \
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            make
+            libtool
+            autoconf
+            automake-wrapper
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-libplist
+            mingw-w64-x86_64-libimobiledevice-glue
+            mingw-w64-x86_64-libusbmuxd
             mingw-w64-x86_64-curl
 
       - name: Build libtatsu 1.0.5 from source
         run: |
           # New dependency as of libimobiledevice 1.4.0 (Apple services
-          # auth) - not packaged by MSYS2 at all yet, unlike the others
-          # above. --prefix=/mingw64 installs it flat alongside everything
-          # pacman already manages, so pkg-config finds it with zero extra
-          # configuration and the existing DLL-closure walk below picks up
+          # auth) - not packaged by MSYS2 at all, unlike the others above.
+          # --prefix=/mingw64 installs it flat alongside everything pacman
+          # already manages, so pkg-config finds it with zero extra
+          # configuration and the DLL-closure walk below picks up
           # libtatsu-1.0.dll the same way it would any pacman package.
-          export PATH="/usr/bin:/mingw64/bin:$PATH"
           git -c core.autocrlf=false clone --branch 1.0.5 --depth 1 https://github.com/libimobiledevice/libtatsu.git /tmp/libtatsu
           cd /tmp/libtatsu
           ./autogen.sh CC=gcc CXX=g++ --prefix=/mingw64
@@ -87,7 +88,19 @@ jobs:
 
       - name: Build libimobiledevice 1.4.0 from source and resolve the DLL closure
         run: |
-          export PATH="/usr/bin:/mingw64/bin:$PATH"
+          # NOT mingw-w64-x86_64-libimobiledevice from pacman - MSYS2's
+          # package is pinned to upstream's last tagged release, 1.3.0
+          # (2020), which has a long-standing, still-open compatibility bug
+          # with the backup protocol on modern iOS ("Could not perform
+          # backup protocol version exchange, error code -1" - see
+          # https://github.com/libimobiledevice/libimobiledevice/issues/1115
+          # and similar). Upstream cut a new 1.4.0 release in Oct 2025 with
+          # explicit "Fixes for idevicebackup2", but MSYS2's package repo
+          # hasn't picked it up - so it's built from source here, from the
+          # real 1.4.0 tag. Everything it depends on (checked against
+          # Homebrew's already-1.4.0-compatible versions) is already fresh
+          # enough as a regular pacman package: libplist 2.7.0,
+          # libimobiledevice-glue 1.3.2, libusbmuxd 2.1.1.
           git -c core.autocrlf=false clone --branch 1.4.0 --depth 1 https://github.com/libimobiledevice/libimobiledevice.git /tmp/libimobiledevice
           cd /tmp/libimobiledevice
           ./autogen.sh CC=gcc CXX=g++ --prefix=/mingw64
