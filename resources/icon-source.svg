@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="drop" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffb84d"/>
+      <stop offset="45%" stop-color="#e8871e"/>
+      <stop offset="100%" stop-color="#a8480a"/>
+    </linearGradient>
+    <radialGradient id="highlight" cx="38%" cy="30%" r="35%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="42%" r="55%">
+      <stop offset="0%" stop-color="#fff3d6" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#fff3d6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Resin drop: teardrop tapering to a point at the top, rounded below -->
+  <path
+    d="
+      M 512 96
+      C 620 260, 796 452, 796 636
+      C 796 792, 668 916, 512 916
+      C 356 916, 228 792, 228 636
+      C 228 452, 404 260, 512 96
+      Z"
+    fill="url(#drop)"
+  />
+  <path
+    d="
+      M 512 96
+      C 620 260, 796 452, 796 636
+      C 796 792, 668 916, 512 916
+      C 356 916, 228 792, 228 636
+      C 228 452, 404 260, 512 96
+      Z"
+    fill="url(#glow)"
+  />
+
+  <!-- A trapped fleck, resin-inclusion style -->
+  <ellipse cx="560" cy="560" rx="34" ry="20" fill="#5c2a06" opacity="0.35" transform="rotate(24 560 560)"/>
+  <ellipse cx="470" cy="470" rx="18" ry="10" fill="#5c2a06" opacity="0.28" transform="rotate(-12 470 470)"/>
+
+  <!-- Glossy highlight -->
+  <ellipse cx="400" cy="360" rx="150" ry="190" fill="url(#highlight)"/>
+</svg>

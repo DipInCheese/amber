@@ -485,3 +485,37 @@ body {
   flex-direction: column;
   gap: 10px;
 }
+
+/* First-run onboarding banner (M6) */
+
+.onboarding-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.onboarding-banner ul {
+  margin: 4px 0 6px;
+  padding-left: 18px;
+}
+
+.onboarding-note {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.onboarding-banner button {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}

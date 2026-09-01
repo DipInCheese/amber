@@ -24,12 +24,25 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Amber contributors",
+    "copyright": "Copyright © Amber contributors. Licensed under GPL-3.0-or-later.",
+    "category": "SocialNetworking",
+    "shortDescription": "Archive and browse your iMessage/SMS history, forever.",
+    "longDescription": "Amber is a local-first desktop app that pulls a full iMessage/SMS conversation off an iPhone or a Mac, stores it in the durable open .amber archive format, and lets you browse it in an iMessage-style reader. Everything runs on-device - no cloud, no accounts, no telemetry.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
   }
 }

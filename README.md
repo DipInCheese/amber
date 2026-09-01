@@ -12,8 +12,14 @@ Everything runs on-device. No cloud, no accounts, no telemetry.
 
 ## Status
 
-Amber is under active development, building milestone by milestone (see
-[Roadmap](#roadmap) below). It is not yet ready for daily use.
+All six milestones have landed (see [Roadmap](#roadmap)) - parsing,
+the `.amber` format, the viewer, the timeline scrubber, plug-and-play
+ingest, and packaging. It's not fully battle-tested yet: the device/live-Mac
+ingest paths haven't been exercised against real hardware in the environment
+that built them, sidecar tools (`idevicebackup2` et al.) aren't bundled into
+installers yet, and imported conversations don't carry edits/replies/
+reactions until amber-core's parser is extended to extract them. Treat it as
+a working first release candidate, not a finished product.
 
 ## The experience
 
@@ -50,9 +56,26 @@ Three sources feed one pipeline (device backup → parse → `.amber`):
 
 ## Install
 
-Amber isn't shipping installers yet — see the [Roadmap](#roadmap). Once M6
-lands, signed-or-not installers for macOS (`.dmg`) and Windows (`.msi`/`.exe`)
-will be attached to [GitHub Releases](../../releases).
+Once a maintainer pushes a `v*.*.*` tag, [`release.yml`](.github/workflows/release.yml)
+builds installers for macOS (Apple Silicon + Intel) and Windows and attaches
+them as a **draft** [GitHub Release](../../releases) for review before
+publishing. Installers are unsigned by default (no certificates are
+configured yet - see [Code signing](#code-signing) below):
+
+- **macOS:** right-click the `.app` → Open → Open, to bypass Gatekeeper's
+  "unidentified developer" warning (only needed the first time).
+- **Windows:** SmartScreen will flag the `.msi`/`.exe` → click "More info" →
+  "Run anyway".
+
+### Code signing
+
+Unset by default; `release.yml` picks up certificates automatically once
+these repository secrets exist, no workflow changes needed:
+
+| Platform | Secrets |
+| --- | --- |
+| macOS (sign + notarize) | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `KEYCHAIN_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` |
+| Windows | `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD` |
 
 ## Building from source
 
@@ -103,7 +126,16 @@ Building in order; each milestone lands as its own set of commits.
       and `live_mac.rs`. Known gap: imports currently carry text/timestamp/
       sender/attachments only (no edits, replies, or reactions yet) - tracked
       separately.
-- [ ] **M6 — package & ship installers** for macOS and Windows.
+- [x] **M6 — package & ship installers** for macOS and Windows.
+      `release.yml` builds and attaches installers to a draft GitHub Release
+      on a version tag. Verified locally on Windows: `npm run tauri build`
+      produces a real, working `.msi` and `.exe` (NSIS) - both launch the
+      actual app. macOS build/signing is configured but unverified here (no
+      Mac available in this environment; CI will be the first real test).
+      Known gap: the `idevicebackup2`/`idevice_id`/ffmpeg/ImageMagick
+      sidecars aren't bundled yet (`externalBin`) - see
+      [`resources/bin/README.md`](resources/bin/README.md); until then,
+      device ingest works only when those tools are on `PATH`.
 
 ## Architecture
 

@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import "./App.css";
 import { ConversationView } from "./ConversationView";
 import { ImportPanel } from "./import/ImportPanel";
+import { OnboardingBanner } from "./OnboardingBanner";
 import { getDayIndex, openArchive, queryMessages } from "./lib/api";
 import type { DayBucketDto, MessageDto, OpenArchiveResult } from "./lib/types";
 
@@ -74,6 +75,8 @@ function App() {
           </div>
         )}
       </header>
+
+      <OnboardingBanner />
 
       <main className="app-body">
         {state.status === "empty" && (
