@@ -9,54 +9,69 @@ name: build-sidecars
 #
 # Windows: libimobiledevice comes from MSYS2's mingw-w64 package repo
 # (MSYS2 is pre-installed on windows-latest runners). The DLL closure is
-# resolved by walking `ldd` output breadth-first so transitive dependencies
-# (openssl, zlib, the mingw runtime, ...) are all included.
+# resolved with a file-based BFS queue over `ldd` output, so transitive
+# dependencies (openssl, zlib, the mingw runtime, ...) are all included.
+# Uses MSYS2's bash directly as the step shell (via the `shell:` template)
+# rather than shelling into it from cmd, to avoid nested-quoting bugs.
 #
 # macOS: libimobiledevice comes from Homebrew (pre-installed on macos-latest,
 # which is Apple Silicon). Dependency dylibs are found via `otool -L` and
 # every reference is rewritten with `install_name_tool` to `@executable_path/...`
 # so the binaries don't need Homebrew's install prefix to exist on an end
-# user's Mac. Intel (x86_64-apple-darwin) isn't covered here yet - Homebrew
-# doesn't natively cross-build for it on an Apple Silicon runner.
+# user's Mac. The BFS queue is file-based (not a bash associative array),
+# since macOS's default /bin/bash is 3.2 and doesn't support `declare -A`.
+# Intel (x86_64-apple-darwin) isn't covered here yet - Homebrew doesn't
+# natively cross-build for it on an Apple Silicon runner.
 on:
   workflow_dispatch:
 
 jobs:
   windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: 'C:\msys64\usr\bin\bash.exe -e {0}'
     steps:
-      - name: Prepare output directory
-        shell: bash
-        run: mkdir -p /c/sidecar-out
-
-      - name: Install libimobiledevice (MSYS2/mingw-w64) and resolve the DLL closure
-        shell: cmd
+      - name: Install libimobiledevice and resolve the DLL closure
         run: |
-          C:\msys64\usr\bin\bash.exe -lc "MSYSTEM=MINGW64 /c/msys64/usr/bin/bash.exe -lc '\
-            set -euo pipefail; \
-            pacman -Sy --noconfirm; \
-            pacman -S --noconfirm mingw-w64-x86_64-libimobiledevice; \
-            cp /mingw64/bin/idevice_id.exe /c/sidecar-out/; \
-            cp /mingw64/bin/idevicebackup2.exe /c/sidecar-out/; \
-            declare -A seen; \
-            worklist=(/c/sidecar-out/idevice_id.exe /c/sidecar-out/idevicebackup2.exe); \
-            while [ ${#worklist[@]} -gt 0 ]; do \
-              f=\"${worklist[0]}\"; \
-              worklist=(\"${worklist[@]:1}\"); \
-              for dll in $(ldd \"$f\" 2>/dev/null | grep -i \"=> /mingw64\" | awk \"{print \\$3}\"); do \
-                base=$(basename \"$dll\"); \
-                if [ -z \"${seen[$base]:-}\" ]; then \
-                  seen[$base]=1; \
-                  cp \"$dll\" /c/sidecar-out/; \
-                  worklist+=(\"/c/sidecar-out/$base\"); \
-                fi; \
-              done; \
-            done; \
-            echo \"--- resolved closure ---\"; \
-            ls -la /c/sidecar-out; \
-            echo \"--- final ldd check (no more /mingw64 refs should be missing) ---\"; \
-            for f in /c/sidecar-out/*.exe; do echo \"$f:\"; ldd \"$f\"; done \
-          '"
+          export PATH="/mingw64/bin:$PATH"
+          pacman -Sy --noconfirm
+          pacman -S --noconfirm mingw-w64-x86_64-libimobiledevice
+
+          out=/c/sidecar-out
+          mkdir -p "$out"
+          worklist="$out/.worklist"
+          seen="$out/.seen"
+          : > "$worklist"
+          : > "$seen"
+
+          enqueue() {
+            base="$(basename "$1")"
+            if ! grep -qxF "$base" "$seen" 2>/dev/null; then
+              echo "$base" >> "$seen"
+              echo "$1" >> "$worklist"
+            fi
+          }
+
+          enqueue /mingw64/bin/idevice_id.exe
+          enqueue /mingw64/bin/idevicebackup2.exe
+
+          while [ -s "$worklist" ]; do
+            f="$(head -n1 "$worklist")"
+            sed -i '1d' "$worklist"
+            base="$(basename "$f")"
+            dest="$out/$base"
+            [ -f "$dest" ] || cp "$f" "$dest"
+            for dll in $(ldd "$dest" 2>/dev/null | grep -i '=> /mingw64' | awk '{print $3}'); do
+              enqueue "$dll"
+            done
+          done
+          rm -f "$worklist" "$seen"
+
+          echo "--- resolved closure ---"
+          ls -la "$out"
+          echo "--- final ldd check (no more /mingw64 refs should be missing) ---"
+          for f in "$out"/*.exe; do echo "$f:"; ldd "$f"; done
 
       - name: Smoke test - run the sidecar standalone (nothing else on PATH)
         shell: bash
@@ -80,38 +95,53 @@ jobs:
 
       - name: Collect binaries and relink dylibs to @executable_path
         run: |
-          set -euo pipefail
-          mkdir -p sidecar-out
+          set -eu
+          out="$PWD/sidecar-out"
+          mkdir -p "$out"
           PREFIX="$(brew --prefix libimobiledevice)"
-          cp "$PREFIX/bin/idevice_id" sidecar-out/
-          cp "$PREFIX/bin/idevicebackup2" sidecar-out/
-          chmod +w sidecar-out/*
 
-          declare -A seen
-          worklist=(sidecar-out/idevice_id sidecar-out/idevicebackup2)
-          while [ ${#worklist[@]} -gt 0 ]; do
-            f="${worklist[0]}"
-            worklist=("${worklist[@]:1}")
-            for dep in $(otool -L "$f" | tail -n +2 | awk '{print $1}'); do
+          worklist="$out/.worklist"
+          seenfile="$out/.seen"
+          : > "$worklist"
+          : > "$seenfile"
+
+          enqueue() {
+            base="$(basename "$1")"
+            if ! grep -qxF "$base" "$seenfile" 2>/dev/null; then
+              echo "$base" >> "$seenfile"
+              echo "$1|$base" >> "$worklist"
+            fi
+          }
+
+          enqueue "$PREFIX/bin/idevice_id"
+          enqueue "$PREFIX/bin/idevicebackup2"
+
+          while [ -s "$worklist" ]; do
+            line="$(head -n1 "$worklist")"
+            sed -i '' '1d' "$worklist"
+            src="${line%%|*}"
+            base="${line##*|}"
+            dest="$out/$base"
+            if [ ! -f "$dest" ]; then
+              cp "$src" "$dest"
+              chmod +w "$dest"
+              install_name_tool -id "@executable_path/$base" "$dest"
+            fi
+            for dep in $(otool -L "$dest" | tail -n +2 | awk '{print $1}'); do
               case "$dep" in
                 /usr/lib/*|/System/*|@rpath/*|@loader_path/*|@executable_path/*) continue ;;
               esac
-              base="$(basename "$dep")"
-              if [ -z "${seen[$base]:-}" ]; then
-                seen[$base]=1
-                cp "$dep" "sidecar-out/$base"
-                chmod +w "sidecar-out/$base"
-                install_name_tool -id "@executable_path/$base" "sidecar-out/$base"
-                worklist+=("sidecar-out/$base")
-              fi
-              install_name_tool -change "$dep" "@executable_path/$base" "$f"
+              enqueue "$dep"
+              depbase="$(basename "$dep")"
+              install_name_tool -change "$dep" "@executable_path/$depbase" "$dest"
             done
           done
+          rm -f "$worklist" "$seenfile"
 
           echo "--- resolved closure ---"
-          ls -la sidecar-out
+          ls -la "$out"
           echo "--- final otool -L check (no /opt/homebrew or /usr/local refs should remain) ---"
-          for f in sidecar-out/*; do echo "$f:"; otool -L "$f"; done
+          for f in "$out"/*; do echo "$f:"; otool -L "$f"; done
 
       - name: Smoke test - run the sidecar standalone
         run: |
