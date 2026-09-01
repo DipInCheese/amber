@@ -34,7 +34,10 @@ jobs:
     steps:
       - name: Install libimobiledevice and resolve the DLL closure
         run: |
-          export PATH="/mingw64/bin:$PATH"
+          # Non-login, non-interactive bash.exe skips /etc/profile, so
+          # MSYS2's own directories (where pacman lives) aren't on PATH by
+          # default here - only what the Windows environment already had.
+          export PATH="/usr/bin:/mingw64/bin:$PATH"
           pacman -Sy --noconfirm
           pacman -S --noconfirm mingw-w64-x86_64-libimobiledevice
 
