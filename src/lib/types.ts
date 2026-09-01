@@ -50,3 +50,26 @@ export interface OpenArchiveResult {
   participants: ParticipantDto[];
   message_count: number;
 }
+
+export interface PrerequisiteStatusDto {
+  ok: boolean;
+  guidance: string | null;
+}
+
+export interface PrerequisiteReportDto {
+  idevice_id: PrerequisiteStatusDto;
+  idevicebackup2: PrerequisiteStatusDto;
+  platform: PrerequisiteStatusDto;
+}
+
+export interface ConversationSummaryDto {
+  chat_identifier: string;
+  display_name: string | null;
+  is_group: boolean;
+  message_count: number;
+}
+
+export type SourceRequest =
+  | { type: "device"; udid: string | null; password: string | null }
+  | { type: "backup"; path: string; password: string | null }
+  | { type: "live_mac" };

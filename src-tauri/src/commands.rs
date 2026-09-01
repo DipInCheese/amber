@@ -28,7 +28,14 @@ impl AppState {
 
 #[tauri::command]
 pub fn open_archive(path: String, state: State<AppState>) -> Result<OpenArchiveResult, String> {
-    let archive = AmberArchive::open(Path::new(&path)).map_err(|err| err.to_string())?;
+    open_and_store(Path::new(&path), &state)
+}
+
+/// Opens `path` and makes it the current archive, returning its summary.
+/// Shared by the [`open_archive`] command and `ingest::ingest_conversation`
+/// (which writes a fresh `.amber` and then opens it the exact same way).
+pub(crate) fn open_and_store(path: &Path, state: &AppState) -> Result<OpenArchiveResult, String> {
+    let archive = AmberArchive::open(path).map_err(|err| err.to_string())?;
     let manifest = archive.manifest();
 
     let result = OpenArchiveResult {
@@ -48,7 +55,7 @@ pub fn open_archive(path: String, state: State<AppState>) -> Result<OpenArchiveR
         message_count: manifest.counts.messages,
     };
 
-    *state.archive.lock().unwrap() = Some(archive);
+    *state.archive() = Some(archive);
     Ok(result)
 }
 

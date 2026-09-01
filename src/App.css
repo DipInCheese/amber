@@ -338,3 +338,150 @@ body {
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* Import panel (M5) */
+
+.import-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.import-panel {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  width: min(480px, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.import-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.import-header h2 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.import-close {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.import-source-choices,
+.import-configure {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.import-source-choices button,
+.import-configure button,
+.import-error button {
+  text-align: left;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.import-source-choices button:hover,
+.import-configure button:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.import-configure button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.import-configure input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.prereq-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+}
+
+.prereq-icon {
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+}
+
+.prereq-ok .prereq-icon {
+  color: #34c759;
+}
+
+.prereq-missing .prereq-icon {
+  color: #ff453a;
+}
+
+.prereq-guidance {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.import-conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.import-conversation-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.import-conversation-row:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.import-conversation-count {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.import-progress,
+.import-error {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

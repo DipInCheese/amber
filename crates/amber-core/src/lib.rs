@@ -8,10 +8,12 @@
 //! a `.amber` archive is `amber-format`'s job.
 
 pub mod error;
+pub mod list;
 pub mod model;
 pub mod parse;
 pub mod time;
 
 pub use error::AmberCoreError;
+pub use list::{list_conversations, ConversationSummary};
 pub use model::DomainMessage;
 pub use parse::parse_conversation;

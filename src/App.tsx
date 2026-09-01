@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useState } from "react";
 import "./App.css";
 import { ConversationView } from "./ConversationView";
+import { ImportPanel } from "./import/ImportPanel";
 import { getDayIndex, openArchive, queryMessages } from "./lib/api";
 import type { DayBucketDto, MessageDto, OpenArchiveResult } from "./lib/types";
 
@@ -19,6 +20,17 @@ type LoadState =
 
 function App() {
   const [state, setState] = useState<LoadState>({ status: "empty" });
+  const [importOpen, setImportOpen] = useState(false);
+
+  const loadCurrentArchive = useCallback(async (conversation: OpenArchiveResult) => {
+    setState({ status: "loading" });
+    try {
+      const [messages, dayBuckets] = await Promise.all([queryMessages(), getDayIndex()]);
+      setState({ status: "ready", conversation, messages, dayBuckets });
+    } catch (err) {
+      setState({ status: "error", message: String(err) });
+    }
+  }, []);
 
   const handleOpen = useCallback(async () => {
     const path = await open({
@@ -30,18 +42,28 @@ function App() {
     setState({ status: "loading" });
     try {
       const conversation = await openArchive(path);
-      const [messages, dayBuckets] = await Promise.all([queryMessages(), getDayIndex()]);
-      setState({ status: "ready", conversation, messages, dayBuckets });
+      await loadCurrentArchive(conversation);
     } catch (err) {
       setState({ status: "error", message: String(err) });
     }
-  }, []);
+  }, [loadCurrentArchive]);
+
+  const handleImported = useCallback(
+    (conversation: OpenArchiveResult) => {
+      setImportOpen(false);
+      void loadCurrentArchive(conversation);
+    },
+    [loadCurrentArchive],
+  );
 
   return (
     <div className="app">
       <header className="app-header">
         <button type="button" className="open-button" onClick={handleOpen}>
           Open .amber…
+        </button>
+        <button type="button" className="open-button" onClick={() => setImportOpen(true)}>
+          Import…
         </button>
         {state.status === "ready" && (
           <div className="conversation-title">
@@ -55,7 +77,7 @@ function App() {
 
       <main className="app-body">
         {state.status === "empty" && (
-          <div className="placeholder">Open a .amber archive to view the conversation.</div>
+          <div className="placeholder">Open a .amber archive, or import one from a phone/backup/Mac.</div>
         )}
         {state.status === "loading" && <div className="placeholder">Loading…</div>}
         {state.status === "error" && (
@@ -69,6 +91,10 @@ function App() {
           />
         )}
       </main>
+
+      {importOpen && (
+        <ImportPanel onClose={() => setImportOpen(false)} onImported={handleImported} />
+      )}
     </div>
   );
 }

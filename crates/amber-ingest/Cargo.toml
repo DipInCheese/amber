@@ -4,8 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Resolves a Source (device / iOS backup / live Mac) to a chat.db + attachments. Implemented in M5."
+description = "Resolves a Source (device / iOS backup / live Mac) to a chat.db + attachments."
 
 [dependencies]
-amber-core.workspace = true
 thiserror.workspace = true
+crabapple.workspace = true
+dirs = "6"
+
+[dev-dependencies]
+tempfile.workspace = true
+rusqlite.workspace = true
+plist = "1"

@@ -92,7 +92,17 @@ Building in order; each milestone lands as its own set of commits.
 - [x] **M4 — timeline scrubber.** Draggable, Photos-style vertical timeline
       with month/year ticks; position maps linearly to calendar date, jumps
       the virtualized thread instantly, and stays in sync as you scroll.
-- [ ] **M5 — plug-and-play device ingest.**
+- [x] **M5 — plug-and-play device ingest.** `amber-ingest` resolves an
+      iPhone over USB, an existing backup, or a live Mac to a Messages
+      database; `check_prerequisites`/`list_devices`/`begin_ingest`/
+      `ingest_conversation` wire it into the app with a real progress
+      indicator and an in-app Import panel. The device/live-Mac paths are
+      written against verified APIs (`idevicebackup2`'s own `--help`/source,
+      `crabapple`'s real crate API) but untested against actual hardware in
+      this environment - see the caveats in `crates/amber-ingest/src/device.rs`
+      and `live_mac.rs`. Known gap: imports currently carry text/timestamp/
+      sender/attachments only (no edits, replies, or reactions yet) - tracked
+      separately.
 - [ ] **M6 — package & ship installers** for macOS and Windows.
 
 ## Architecture

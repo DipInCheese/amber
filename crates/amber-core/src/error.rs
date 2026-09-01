@@ -9,4 +9,7 @@ pub enum AmberCoreError {
 
     #[error("database error: {0}")]
     Table(#[from] TableError),
+
+    #[error("database error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
 }
