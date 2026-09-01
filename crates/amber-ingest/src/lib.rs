@@ -23,7 +23,9 @@ mod source;
 pub use command_runner::{CommandOutput, CommandRunner, SystemCommandRunner};
 pub use device::{list_devices, select_device, Tools};
 pub use error::IngestError;
-pub use prerequisites::{check_prerequisites, PrerequisiteReport, PrerequisiteStatus};
+pub use prerequisites::{
+    check_prerequisites, install_usb_driver, PrerequisiteReport, PrerequisiteStatus,
+};
 pub use source::{AttachmentLocator, ResolvedSource, Source};
 
 use std::path::Path;

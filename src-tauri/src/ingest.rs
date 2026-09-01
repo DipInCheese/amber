@@ -50,6 +50,15 @@ pub fn list_ingest_devices(app: AppHandle) -> Result<Vec<String>, String> {
     list_devices(&runner, &tools()).map_err(|err| err.to_string())
 }
 
+/// Windows only: try to install Apple's USB driver unattended via `winget`.
+/// The frontend falls back to opening the Microsoft Store listing itself
+/// (`PrerequisiteStatus::remediation_url`) if this errors.
+#[tauri::command]
+pub fn install_usb_driver(app: AppHandle) -> Result<(), String> {
+    let runner = SidecarCommandRunner::new(app);
+    amber_ingest::install_usb_driver(&runner)
+}
+
 /// What the frontend sends to start an import - mirrors [`amber_ingest::Source`]
 /// but as a `serde`-friendly, JSON-tagged request (`Source` itself isn't
 /// `Deserialize`, since `amber-ingest` has no reason to depend on `serde`

@@ -140,6 +140,54 @@ fn check_platform_driver(_runner: &dyn CommandRunner) -> PrerequisiteStatus {
     PrerequisiteStatus::Ok
 }
 
+/// Best-effort, unattended install of Apple's Mobile Device USB driver via
+/// `winget` and Apple's own Microsoft Store listing - `winget` ships by
+/// default on Windows 10 (2004+) and Windows 11, and installing straight
+/// from the Microsoft Store source is the one path that doesn't require
+/// Amber to bundle or redistribute Apple's proprietary driver itself
+/// (unlike `libimobiledevice`, which is open source). Callers should fall
+/// back to just opening the Store listing (`PrerequisiteStatus`'s
+/// `remediation_url`) if this errors - `winget` missing, the install
+/// failing, or not being on Windows at all are all real possibilities.
+#[cfg(target_os = "windows")]
+pub fn install_usb_driver(runner: &dyn CommandRunner) -> Result<(), String> {
+    let mut stdout = String::new();
+    let output = runner
+        .run(
+            Path::new("winget"),
+            &[
+                "install",
+                "--id",
+                "9NP83LWLPZ9K",
+                "--source",
+                "msstore",
+                "-e",
+                "--silent",
+                "--accept-package-agreements",
+                "--accept-source-agreements",
+            ],
+            &[],
+            &mut |line| {
+                stdout.push_str(line);
+                stdout.push('\n');
+            },
+        )
+        .map_err(|err| format!("winget isn't available: {err}"))?;
+
+    if output.success {
+        Ok(())
+    } else if !output.stderr.is_empty() {
+        Err(output.stderr)
+    } else {
+        Err(stdout)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn install_usb_driver(_runner: &dyn CommandRunner) -> Result<(), String> {
+    Err("Automatic install is only available on Windows.".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

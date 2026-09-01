@@ -43,6 +43,11 @@ export function listIngestDevices(): Promise<string[]> {
   return invoke("list_ingest_devices");
 }
 
+/** Windows only: unattended `winget` install of Apple's USB driver. Throws if unavailable/failed - callers should fall back to opening the prerequisite's `remediation_url` themselves. */
+export function installUsbDriver(): Promise<void> {
+  return invoke("install_usb_driver");
+}
+
 export function beginIngest(source: SourceRequest): Promise<ConversationSummaryDto[]> {
   return invoke("begin_ingest", { source });
 }

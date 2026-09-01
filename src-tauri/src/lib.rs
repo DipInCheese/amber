@@ -25,6 +25,7 @@ pub fn run() {
             commands::get_day_index,
             ingest::check_ingest_prerequisites,
             ingest::list_ingest_devices,
+            ingest::install_usb_driver,
             ingest::begin_ingest,
             ingest::ingest_conversation,
         ])
