@@ -4,8 +4,8 @@ members = [
     "crates/amber-core",
     "crates/amber-format",
     "crates/amber-ingest",
+    "src-tauri",
 ]
-# src-tauri joins the workspace in M3, once there's a viewer to wire it to.
 
 [workspace.package]
 version = "0.1.0"

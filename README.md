@@ -60,12 +60,21 @@ Requires a recent stable [Rust toolchain](https://rustup.rs) and
 [Node.js](https://nodejs.org).
 
 ```bash
+npm install
 cargo build --workspace
 cargo test --workspace
+npx tsc --noEmit
+npm run tauri dev   # launches the desktop app
 ```
 
-The frontend and Tauri shell (`src-tauri/`) join the workspace in M3, once
-there's a viewer to build.
+**Frontend stack:** React + TypeScript + Vite, with
+[TanStack Virtual](https://tanstack.com/virtual) for the message list
+(mandatory at 7-year/tens-of-thousands-of-messages scale) — chosen for
+Tauri's first-class React support and TanStack Virtual's maturity over the
+Svelte alternative. Attachments are served straight out of the open
+`.amber`'s ZIP by a custom `amber-attachment://` Tauri protocol
+([`src-tauri/src/protocol.rs`](src-tauri/src/protocol.rs)), never copied into
+the web layer.
 
 ## Roadmap
 
@@ -77,7 +86,9 @@ Building in order; each milestone lands as its own set of commits.
 - [x] **M2 — `.amber` writer + reader** per `SPEC.md`: writes a valid
       bundle, reopens it, and round-trips every table plus content-addressed
       attachments and the integrity check.
-- [ ] **M3 — viewer:** virtualized iMessage-style thread.
+- [x] **M3 — viewer:** virtualized iMessage-style thread from a `.amber` -
+      bubbles, date separators, timestamps, emoji, inline photos/video,
+      reactions, edited/unsent/reply indicators.
 - [ ] **M4 — timeline scrubber.**
 - [ ] **M5 — plug-and-play device ingest.**
 - [ ] **M6 — package & ship installers** for macOS and Windows.
@@ -103,7 +114,8 @@ LiveMac: copy chat.db        Writer (amber-format) ──> .amber bundle
 | [`amber-core`](crates/amber-core) | Domain model + iMessage/SMS parsing. UI-independent. |
 | [`amber-format`](crates/amber-format) | `.amber` reader/writer per [`SPEC.md`](SPEC.md). |
 | [`amber-ingest`](crates/amber-ingest) | Resolves a device/backup/live-Mac source to a database. |
-| `src-tauri` | The desktop app shell (from M3). |
+| [`src-tauri`](src-tauri) | The desktop app shell: Tauri commands, the `amber-attachment` protocol, window/bundle config. |
+| [`src`](src) | The React viewer: virtualized thread, bubbles, timeline scrubber (M4). |
 
 ## Credits
 
