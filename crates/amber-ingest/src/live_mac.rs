@@ -15,6 +15,15 @@ use crate::source::{AttachmentLocator, ResolvedSource};
 pub fn resolve(work_dir: &Path) -> Result<ResolvedSource, IngestError> {
     let home =
         dirs::home_dir().ok_or_else(|| IngestError::LiveMacDatabaseNotFound(PathBuf::from("~")))?;
+    resolve_from_home(&home, work_dir)
+}
+
+/// The testable core of [`resolve`]: takes the home directory explicitly
+/// rather than reading it from the environment, so tests can point it at a
+/// controlled temp directory instead of the real machine's home - which, on
+/// an actual Mac (including GitHub's `macos-latest` runners), already has a
+/// `~/Library/Messages/chat.db` even on a fresh image.
+fn resolve_from_home(home: &Path, work_dir: &Path) -> Result<ResolvedSource, IngestError> {
     let live_db_path = home.join("Library/Messages/chat.db");
 
     if !live_db_path.is_file() {
@@ -42,7 +51,9 @@ pub fn resolve(work_dir: &Path) -> Result<ResolvedSource, IngestError> {
     Ok(ResolvedSource::new(
         chat_db_path,
         None,
-        Box::new(LiveMacAttachmentLocator { home }),
+        Box::new(LiveMacAttachmentLocator {
+            home: home.to_path_buf(),
+        }),
     ))
 }
 
@@ -97,13 +108,39 @@ mod tests {
 
     #[test]
     fn missing_live_database_is_a_clear_error() {
-        // A work_dir that exists but has no corresponding ~/Library/Messages/chat.db
-        // reachable is the honest state of this test environment (no real Mac).
-        let temp = tempfile::tempdir().unwrap();
-        let result = resolve(temp.path());
+        let fake_home = tempfile::tempdir().unwrap();
+        let work_dir = tempfile::tempdir().unwrap();
+
+        let result = resolve_from_home(fake_home.path(), work_dir.path());
+
         assert!(matches!(
             result,
             Err(IngestError::LiveMacDatabaseNotFound(_))
         ));
+    }
+
+    #[test]
+    fn copies_the_live_database_and_wal_shm_sidecars_when_present() {
+        let fake_home = tempfile::tempdir().unwrap();
+        let work_dir = tempfile::tempdir().unwrap();
+
+        let messages_dir = fake_home.path().join("Library/Messages");
+        std::fs::create_dir_all(&messages_dir).unwrap();
+        std::fs::write(messages_dir.join("chat.db"), b"fake chat.db bytes").unwrap();
+        std::fs::write(messages_dir.join("chat.db-wal"), b"fake wal bytes").unwrap();
+        // No -shm sidecar, to prove its absence doesn't fail the copy.
+
+        let resolved = resolve_from_home(fake_home.path(), work_dir.path()).unwrap();
+
+        assert_eq!(
+            std::fs::read(&resolved.chat_db_path).unwrap(),
+            b"fake chat.db bytes"
+        );
+        let wal_path = {
+            let mut p = resolved.chat_db_path.clone().into_os_string();
+            p.push("-wal");
+            PathBuf::from(p)
+        };
+        assert_eq!(std::fs::read(&wal_path).unwrap(), b"fake wal bytes");
     }
 }
