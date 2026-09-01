@@ -1,0 +1,41 @@
+# --- Rust / Cargo ---
+# Cargo.lock is intentionally committed: this workspace ships an application
+# (the Tauri app), and applications should pin exact dependency versions.
+/target/
+**/target/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# --- Tauri ---
+src-tauri/target/
+src-tauri/gen/
+
+# --- Never commit real data ---
+# fixtures/ holds only tiny synthetic databases checked in on purpose.
+*.amber
+chat.db
+chat.db-wal
+chat.db-shm
+Manifest.plist
+Info.plist
+Status.plist
+*.mbdb
+*.mbdx
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# --- Secrets ---
+.env
+.env.*
+*.pem
+*.p12
+*.mobileprovision

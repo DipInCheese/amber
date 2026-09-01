@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/amber-core",
+    "crates/amber-format",
+    "crates/amber-ingest",
+]
+# src-tauri joins the workspace in M3, once there's a viewer to wire it to.
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/DipInCheese/amber"
+
+[workspace.dependencies]
+amber-core = { path = "crates/amber-core" }
+amber-format = { path = "crates/amber-format" }
+amber-ingest = { path = "crates/amber-ingest" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40", features = ["blob", "bundled"] }
+chrono = "0.4"
+thiserror = "2"
+sha2 = "0.10"
+zip = "2"
+tempfile = "3"
+
+imessage-database = "4.2.0"
+crabapple = "0.4.7"
