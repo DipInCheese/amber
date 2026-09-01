@@ -74,7 +74,9 @@ Building in order; each milestone lands as its own set of commits.
 - [x] **M1 — parsing slice.** Given a `chat.db` and a chat identifier,
       produce `DomainMessage`s (text, timestamp, sender, attachments),
       decoding `attributedBody` where `text` is empty.
-- [ ] **M2 — `.amber` writer + reader** per `SPEC.md`.
+- [x] **M2 — `.amber` writer + reader** per `SPEC.md`: writes a valid
+      bundle, reopens it, and round-trips every table plus content-addressed
+      attachments and the integrity check.
 - [ ] **M3 — viewer:** virtualized iMessage-style thread.
 - [ ] **M4 — timeline scrubber.**
 - [ ] **M5 — plug-and-play device ingest.**

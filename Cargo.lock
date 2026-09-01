@@ -35,11 +35,12 @@ dependencies = [
 name = "amber-format"
 version = "0.1.0"
 dependencies = [
- "amber-core",
+ "chrono",
  "rusqlite",
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror 2.0.20",
  "zip",
 ]
