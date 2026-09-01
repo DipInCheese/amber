@@ -29,4 +29,5 @@ amber-core.workspace = true
 amber-format.workspace = true
 amber-ingest.workspace = true
 tempfile.workspace = true
+tauri-plugin-shell = "2"
 

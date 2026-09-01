@@ -14,14 +14,15 @@ use amber_format::{
 };
 use amber_ingest::{
     check_prerequisites, list_devices, resolve_backup, resolve_device, resolve_live_mac,
-    PrerequisiteReport, ResolvedSource, SystemCommandRunner,
+    PrerequisiteReport, ResolvedSource,
 };
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::{open_and_store, AppState};
 use crate::dto::{ConversationSummaryDto, OpenArchiveResult, PrerequisiteReportDto};
-use crate::tools::resolve_tools;
+use crate::sidecar::SidecarCommandRunner;
+use crate::tools::tools;
 
 /// A source that's been resolved to a chat database, waiting for the user
 /// to pick which conversation to import. Kept alive (including its temp
@@ -38,15 +39,15 @@ pub struct IngestState {
 
 #[tauri::command]
 pub fn check_ingest_prerequisites(app: AppHandle) -> PrerequisiteReportDto {
-    let tools = resolve_tools(&app);
-    let report: PrerequisiteReport = check_prerequisites(&SystemCommandRunner, &tools);
+    let runner = SidecarCommandRunner::new(app);
+    let report: PrerequisiteReport = check_prerequisites(&runner, &tools());
     report.into()
 }
 
 #[tauri::command]
 pub fn list_ingest_devices(app: AppHandle) -> Result<Vec<String>, String> {
-    let tools = resolve_tools(&app);
-    list_devices(&SystemCommandRunner, &tools).map_err(|err| err.to_string())
+    let runner = SidecarCommandRunner::new(app);
+    list_devices(&runner, &tools()).map_err(|err| err.to_string())
 }
 
 /// What the frontend sends to start an import - mirrors [`amber_ingest::Source`]
@@ -87,12 +88,12 @@ pub fn begin_ingest(
                 .map_err(|err| err.to_string())?
         }
         SourceRequest::Device { udid, password } => {
-            let tools = resolve_tools(&app);
+            let runner = SidecarCommandRunner::new(app.clone());
             let backups_root = work_dir.path().join("device-backup");
             let progress_app = app.clone();
             resolve_device(
-                &SystemCommandRunner,
-                &tools,
+                &runner,
+                &tools(),
                 udid.as_deref(),
                 password.as_deref(),
                 &backups_root,

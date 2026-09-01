@@ -4,6 +4,7 @@ mod dto;
 mod ingest;
 mod mime;
 mod protocol;
+mod sidecar;
 mod tools;
 
 use commands::AppState;
@@ -14,6 +15,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
         .manage(AppState::default())
         .manage(IngestState::default())
         .register_uri_scheme_protocol(protocol::SCHEME, protocol::handle_request)

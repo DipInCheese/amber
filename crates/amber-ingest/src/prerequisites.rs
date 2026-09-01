@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! First-run / pre-ingest checks: are the bundled device-backup tools
-//! present, and does the platform have what it needs (Full Disk Access on
-//! macOS, Apple's USB driver on Windows)?
+//! First-run / pre-ingest checks: are the device-backup tools invocable
+//! (as a bundled sidecar or via `PATH`), and does the platform have what it
+//! needs (Full Disk Access on macOS, Apple's USB driver on Windows)?
 
 use std::path::Path;
 
@@ -26,9 +26,9 @@ impl PrerequisiteStatus {
 
 #[derive(Debug, Clone)]
 pub struct PrerequisiteReport {
-    /// Bundled `idevice_id` sidecar (device enumeration).
+    /// `idevice_id` (device enumeration) - bundled sidecar or on `PATH`.
     pub idevice_id: PrerequisiteStatus,
-    /// Bundled `idevicebackup2` sidecar (backup creation/refresh).
+    /// `idevicebackup2` (backup creation/refresh) - bundled sidecar or on `PATH`.
     pub idevicebackup2: PrerequisiteStatus,
     /// Full Disk Access (macOS) or Apple's USB driver (Windows). A no-op
     /// `Ok` on the platform it doesn't apply to.
@@ -43,26 +43,31 @@ impl PrerequisiteReport {
 }
 
 /// Check everything `Source::Device` ingest needs before it's attempted:
-/// the bundled tools exist, and the platform-specific USB/Full-Disk-Access
+/// the tools actually run (via `runner` - a bundled sidecar or `PATH`, same
+/// as the real ingest calls use), and the platform-specific USB/Full-Disk-Access
 /// prerequisite is met.
 pub fn check_prerequisites(runner: &dyn CommandRunner, tools: &Tools) -> PrerequisiteReport {
     PrerequisiteReport {
-        idevice_id: check_tool_present("idevice_id", &tools.idevice_id),
-        idevicebackup2: check_tool_present("idevicebackup2", &tools.idevicebackup2),
+        idevice_id: check_tool_present(runner, "idevice_id", &tools.idevice_id),
+        idevicebackup2: check_tool_present(runner, "idevicebackup2", &tools.idevicebackup2),
         platform: check_platform_driver(runner),
     }
 }
 
-fn check_tool_present(name: &str, path: &Path) -> PrerequisiteStatus {
-    if path.is_file() {
-        PrerequisiteStatus::Ok
-    } else {
-        PrerequisiteStatus::Missing {
+/// A real invocation (`--version`, which both tools document) rather than a
+/// filesystem check: it works uniformly whether the tool is a bundled Tauri
+/// sidecar (resolved at a Tauri-managed runtime path, not a fixed
+/// filesystem location this crate knows about) or found on `PATH` for local
+/// development. The exit code doesn't matter, only whether the process
+/// could be spawned at all.
+fn check_tool_present(runner: &dyn CommandRunner, name: &str, path: &Path) -> PrerequisiteStatus {
+    match runner.run(path, &["--version"], &[], &mut |_| {}) {
+        Ok(_) => PrerequisiteStatus::Ok,
+        Err(_) => PrerequisiteStatus::Missing {
             guidance: format!(
-                "{name} is missing from Amber's bundled tools ({}). Reinstalling Amber should restore it.",
-                path.display()
+                "{name} isn't available. Reinstalling Amber should restore it if this is a bundled build; for local development, install libimobiledevice and make sure {name} is on PATH."
             ),
-        }
+        },
     }
 }
 
@@ -126,32 +131,50 @@ mod tests {
     use super::*;
     use crate::command_runner::CommandOutput;
 
+    /// Simulates "binary not found" (an `Err`, like a real failed spawn)
+    /// for any program name in `unavailable`; everything else "succeeds".
     struct FakeCommandRunner {
-        success: bool,
+        unavailable: Vec<&'static str>,
     }
 
     impl CommandRunner for FakeCommandRunner {
         fn run(
             &self,
-            _program: &Path,
+            program: &Path,
             _args: &[&str],
             _envs: &[(&str, &str)],
             _on_stdout_line: &mut dyn FnMut(&str),
         ) -> std::io::Result<CommandOutput> {
+            let name = program
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            if self.unavailable.contains(&name) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "not found",
+                ));
+            }
             Ok(CommandOutput {
-                success: self.success,
+                success: true,
                 stderr: String::new(),
             })
         }
     }
 
+    fn tools() -> Tools {
+        Tools {
+            idevice_id: Path::new("idevice_id").to_path_buf(),
+            idevicebackup2: Path::new("idevicebackup2").to_path_buf(),
+        }
+    }
+
     #[test]
     fn missing_tools_are_reported_missing_with_guidance() {
-        let tools = Tools {
-            idevice_id: Path::new("/definitely/does/not/exist/idevice_id").to_path_buf(),
-            idevicebackup2: Path::new("/definitely/does/not/exist/idevicebackup2").to_path_buf(),
+        let runner = FakeCommandRunner {
+            unavailable: vec!["idevice_id", "idevicebackup2"],
         };
-        let report = check_prerequisites(&FakeCommandRunner { success: true }, &tools);
+        let report = check_prerequisites(&runner, &tools());
 
         assert!(!report.idevice_id.is_ok());
         assert!(!report.idevicebackup2.is_ok());
@@ -160,13 +183,10 @@ mod tests {
 
     #[test]
     fn present_tools_are_reported_ok() {
-        // This test binary itself is a real file - stands in for a present tool.
-        let self_path = std::env::current_exe().unwrap();
-        let tools = Tools {
-            idevice_id: self_path.clone(),
-            idevicebackup2: self_path,
+        let runner = FakeCommandRunner {
+            unavailable: vec![],
         };
-        let report = check_prerequisites(&FakeCommandRunner { success: true }, &tools);
+        let report = check_prerequisites(&runner, &tools());
 
         assert!(report.idevice_id.is_ok());
         assert!(report.idevicebackup2.is_ok());

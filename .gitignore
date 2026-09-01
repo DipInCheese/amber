@@ -33,6 +33,9 @@ Status.plist
 Thumbs.db
 *.swp
 
+# --- Claude Code session state (worktrees, locks) ---
+.claude/
+
 # --- Secrets ---
 .env
 .env.*
