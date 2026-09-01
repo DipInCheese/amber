@@ -107,15 +107,20 @@ fn check_platform_driver(_runner: &dyn CommandRunner) -> PrerequisiteStatus {
 #[cfg(target_os = "windows")]
 fn check_platform_driver(runner: &dyn CommandRunner) -> PrerequisiteStatus {
     let missing = PrerequisiteStatus::Missing {
-        guidance: "Amber needs Apple's Mobile Device USB driver to talk to an iPhone. Get the \
-            Apple Devices app from the Microsoft Store, then reconnect your phone."
+        guidance: "Amber needs Apple's Mobile Device USB driver to talk to an iPhone. Download \
+            and run Apple's installer, then reconnect your phone."
             .to_string(),
-        // Apple's driver is proprietary and not something Amber can bundle
-        // or install itself (unlike libimobiledevice) - this opens Apple's
-        // own official Microsoft Store listing so it's one click away
-        // instead of a manual search. The user still drives the actual
-        // install through the Store's own UI.
-        remediation_url: Some("ms-windows-store://pdp/?productid=9NP83LWLPZ9K".to_string()),
+        // The Microsoft Store "Apple Devices" app (and installing it via
+        // `winget`) is unreliable at actually registering the kernel-level
+        // driver/service this check looks for - confirmed both by testing
+        // (the app installs fine, "Apple Mobile Device Service" still never
+        // appears) and by widely-reported user reports of the same
+        // symptom. Apple's own standalone installer is the path that
+        // consistently works, so that's what "Fix it" sends the user to -
+        // still their own click-through (a driver/service install always
+        // needs a UAC prompt, so this was never going to be fully silent
+        // either way), just pointed at something that actually works.
+        remediation_url: Some("https://www.apple.com/itunes/download/win64".to_string()),
     };
 
     let mut ignored = String::new();
@@ -138,54 +143,6 @@ fn check_platform_driver(runner: &dyn CommandRunner) -> PrerequisiteStatus {
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn check_platform_driver(_runner: &dyn CommandRunner) -> PrerequisiteStatus {
     PrerequisiteStatus::Ok
-}
-
-/// Best-effort, unattended install of Apple's Mobile Device USB driver via
-/// `winget` and Apple's own Microsoft Store listing - `winget` ships by
-/// default on Windows 10 (2004+) and Windows 11, and installing straight
-/// from the Microsoft Store source is the one path that doesn't require
-/// Amber to bundle or redistribute Apple's proprietary driver itself
-/// (unlike `libimobiledevice`, which is open source). Callers should fall
-/// back to just opening the Store listing (`PrerequisiteStatus`'s
-/// `remediation_url`) if this errors - `winget` missing, the install
-/// failing, or not being on Windows at all are all real possibilities.
-#[cfg(target_os = "windows")]
-pub fn install_usb_driver(runner: &dyn CommandRunner) -> Result<(), String> {
-    let mut stdout = String::new();
-    let output = runner
-        .run(
-            Path::new("winget"),
-            &[
-                "install",
-                "--id",
-                "9NP83LWLPZ9K",
-                "--source",
-                "msstore",
-                "-e",
-                "--silent",
-                "--accept-package-agreements",
-                "--accept-source-agreements",
-            ],
-            &[],
-            &mut |line| {
-                stdout.push_str(line);
-                stdout.push('\n');
-            },
-        )
-        .map_err(|err| format!("winget isn't available: {err}"))?;
-
-    if output.success {
-        Ok(())
-    } else if !output.stderr.is_empty() {
-        Err(output.stderr)
-    } else {
-        Err(stdout)
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn install_usb_driver(_runner: &dyn CommandRunner) -> Result<(), String> {
-    Err("Automatic install is only available on Windows.".to_string())
 }
 
 #[cfg(test)]

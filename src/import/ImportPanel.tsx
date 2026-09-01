@@ -6,7 +6,6 @@ import {
   beginIngest,
   checkIngestPrerequisites,
   ingestConversation,
-  installUsbDriver,
   listIngestDevices,
   onBackupProgress,
 } from "../lib/api";
@@ -32,15 +31,11 @@ function PrerequisiteRow({
   ok,
   guidance,
   remediationUrl,
-  onFix,
-  busy,
 }: {
   label: string;
   ok: boolean;
   guidance: string | null;
   remediationUrl: string | null;
-  onFix?: () => void;
-  busy?: boolean;
 }) {
   return (
     <div className={`prereq-row ${ok ? "prereq-ok" : "prereq-missing"}`}>
@@ -49,13 +44,8 @@ function PrerequisiteRow({
         <div className="prereq-label">{label}</div>
         {!ok && guidance && <div className="prereq-guidance">{guidance}</div>}
         {!ok && remediationUrl && (
-          <button
-            type="button"
-            className="prereq-fix"
-            disabled={busy}
-            onClick={onFix ?? (() => openUrl(remediationUrl))}
-          >
-            {busy ? "Installing…" : "Fix it"}
+          <button type="button" className="prereq-fix" onClick={() => openUrl(remediationUrl)}>
+            Fix it
           </button>
         )}
       </div>
@@ -75,7 +65,6 @@ export function ImportPanel({
   const [devices, setDevices] = useState<string[]>([]);
   const [password, setPassword] = useState("");
   const [backupPath, setBackupPath] = useState<string | null>(null);
-  const [fixingDriver, setFixingDriver] = useState(false);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -96,22 +85,6 @@ export function ImportPanel({
       setDevices(await listIngestDevices().catch(() => []));
     }
   }, []);
-
-  /** Tries the unattended `winget` install first; falls back to just opening the Store/System Settings page if that isn't available or fails (not Windows, no winget, install error). */
-  const fixUsbDriver = useCallback(
-    async (remediationUrl: string) => {
-      setFixingDriver(true);
-      try {
-        await installUsbDriver();
-        await refreshDevicePrereqs();
-      } catch {
-        await openUrl(remediationUrl);
-      } finally {
-        setFixingDriver(false);
-      }
-    },
-    [refreshDevicePrereqs],
-  );
 
   const chooseKind = useCallback(
     async (kind: SourceKind) => {
@@ -209,12 +182,6 @@ export function ImportPanel({
                   ok={prereqs.platform.ok}
                   guidance={prereqs.platform.guidance}
                   remediationUrl={prereqs.platform.remediation_url}
-                  busy={fixingDriver}
-                  onFix={
-                    prereqs.platform.remediation_url
-                      ? () => fixUsbDriver(prereqs.platform.remediation_url as string)
-                      : undefined
-                  }
                 />
               </>
             )}
