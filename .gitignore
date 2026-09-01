@@ -14,6 +14,14 @@ dist/
 src-tauri/target/
 src-tauri/gen/
 
+# --- Sidecar binaries (built fresh by CI - see .github/workflows/build-sidecars.yml
+# and resources/bin/README.md - never committed) ---
+resources/bin/*
+!resources/bin/README.md
+# Generated -c override merging externalBin+resources at sidecar-build time
+# (see release.yml) - never committed, regenerated fresh each build.
+src-tauri/sidecar-config.json
+
 # --- Never commit real data ---
 # fixtures/ holds only tiny synthetic databases checked in on purpose.
 *.amber

@@ -9,6 +9,16 @@ name: release
 # unset, tauri-action produces the same unsigned installers `tauri build`
 # does locally - "open anyway" (macOS Gatekeeper right-click; Windows
 # SmartScreen "More info") still works, just with an OS warning first.
+#
+# Bundles idevice_id/idevicebackup2 as real, self-contained sidecars,
+# fetched fresh from trusted package repos already on GitHub's hosted
+# runners (MSYS2 on Windows, Homebrew on macOS) rather than committed to
+# the repo - see resources/bin/README.md and
+# .github/workflows/build-sidecars.yml, which validated this same approach.
+# Not yet covered: x86_64-apple-darwin (Intel) sidecars - Homebrew on an
+# Apple Silicon runner doesn't natively cross-build for it, so that one
+# build ships without bundled device tools until that's addressed
+# separately.
 on:
   push:
     tags:
@@ -23,11 +33,14 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
+            target: aarch64-apple-darwin
+            sidecar: macos
           - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
+            target: x86_64-apple-darwin
+            sidecar: none
           - platform: windows-latest
-            args: ""
+            target: ""
+            sidecar: windows
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -50,6 +63,165 @@ jobs:
       - name: npm ci
         run: npm ci
 
+      # --- Sidecars: idevice_id/idevicebackup2, self-contained --------
+
+      - name: 'Sidecars (Windows): install libimobiledevice and resolve the DLL closure'
+        if: matrix.sidecar == 'windows'
+        shell: 'C:\msys64\usr\bin\bash.exe -e {0}'
+        run: |
+          export PATH="/usr/bin:/mingw64/bin:$PATH"
+          pacman -Sy --noconfirm
+          pacman -S --noconfirm mingw-w64-x86_64-libimobiledevice
+
+          out="$(cygpath -u '${{ github.workspace }}')/resources/bin"
+          mkdir -p "$out"
+          cp /mingw64/bin/idevice_id.exe "$out/idevice_id-x86_64-pc-windows-msvc.exe"
+          cp /mingw64/bin/idevicebackup2.exe "$out/idevicebackup2-x86_64-pc-windows-msvc.exe"
+
+          worklist="$out/.worklist"
+          seen="$out/.seen"
+          : > "$worklist"
+          : > "$seen"
+          enqueue() {
+            base="$(basename "$1")"
+            if ! grep -qxF "$base" "$seen" 2>/dev/null; then
+              echo "$base" >> "$seen"
+              echo "$1" >> "$worklist"
+            fi
+          }
+          # Seed from the two already-placed executables' own dependencies -
+          # not the executables themselves, which are already correctly
+          # placed under their triple-suffixed externalBin names above.
+          for entry in "$out/idevice_id-x86_64-pc-windows-msvc.exe" "$out/idevicebackup2-x86_64-pc-windows-msvc.exe"; do
+            for dll in $(ldd "$entry" 2>/dev/null | grep -i '=> /mingw64' | awk '{print $3}'); do
+              enqueue "$dll"
+            done
+          done
+          while [ -s "$worklist" ]; do
+            f="$(head -n1 "$worklist")"
+            sed -i '1d' "$worklist"
+            base="$(basename "$f")"
+            dest="$out/$base"
+            [ -f "$dest" ] || cp "$f" "$dest"
+            for dll in $(ldd "$dest" 2>/dev/null | grep -i '=> /mingw64' | awk '{print $3}'); do
+              enqueue "$dll"
+            done
+          done
+          rm -f "$worklist" "$seen"
+
+          # externalBin lives in this generated override, not the committed
+          # tauri.conf.json: tauri-build's build script validates every
+          # externalBin source path on *every* cargo build of amber-desktop
+          # (not just bundling), so declaring it unconditionally would break
+          # plain `cargo build`/`cargo test`/`tauri dev` whenever sidecars
+          # haven't been prepared - confirmed locally ("resource path ...
+          # doesn't exist", failing the tauri-build build script itself).
+          #
+          # `resources` is a flat Map (source -> bare filename), not a glob
+          # List: Tauri's `resources` preserves source directory structure
+          # by default, so a glob like "../resources/bin/*.dll" installs
+          # into a literal "_up_/resources/bin/" subfolder - not next to the
+          # sidecar exes, where Windows' DLL search order actually looks.
+          # Verified locally (target/release/wix/x64/main.wxs): the glob
+          # form nested everything under _up_, the Map form below installs
+          # every DLL flat, as a sibling of idevice_id.exe.
+          json='{"bundle":{"externalBin":["../resources/bin/idevice_id","../resources/bin/idevicebackup2"],"resources":{'
+          first=1
+          for f in "$out"/*.dll; do
+            name="$(basename "$f")"
+            [ "$first" = "1" ] && first=0 || json="$json,"
+            json="$json\"../resources/bin/$name\":\"$name\""
+          done
+          json="$json}}}"
+          echo "$json" > src-tauri/sidecar-config.json
+          cat src-tauri/sidecar-config.json
+          ls -la "$out"
+
+      - name: 'Sidecars (macOS): install libimobiledevice and relink dylibs'
+        if: matrix.sidecar == 'macos'
+        run: |
+          set -eu
+          out="$GITHUB_WORKSPACE/resources/bin"
+          mkdir -p "$out"
+          brew install libimobiledevice
+          PREFIX="$(brew --prefix libimobiledevice)"
+          cp "$PREFIX/bin/idevice_id" "$out/idevice_id-aarch64-apple-darwin"
+          cp "$PREFIX/bin/idevicebackup2" "$out/idevicebackup2-aarch64-apple-darwin"
+          chmod +w "$out"/idevice_id-aarch64-apple-darwin "$out"/idevicebackup2-aarch64-apple-darwin
+
+          worklist="$out/.worklist"
+          seenfile="$out/.seen"
+          : > "$worklist"
+          : > "$seenfile"
+          enqueue() {
+            base="$(basename "$1")"
+            kind="$2"
+            if ! grep -qxF "$base" "$seenfile" 2>/dev/null; then
+              echo "$base" >> "$seenfile"
+              echo "$1|$base|$kind" >> "$worklist"
+            fi
+          }
+
+          relink() {
+            entry_dest="$1"
+            entry_kind="$2"
+            if [ "$entry_kind" = "exe" ]; then
+              rewrite_prefix="@executable_path/../Resources"
+            else
+              rewrite_prefix="@loader_path"
+            fi
+            for dep in $(otool -L "$entry_dest" | tail -n +2 | awk '{print $1}'); do
+              case "$dep" in
+                /usr/lib/*|/System/*|@rpath/*|@loader_path/*|@executable_path/*) continue ;;
+              esac
+              enqueue "$dep" lib
+              depbase="$(basename "$dep")"
+              install_name_tool -change "$dep" "$rewrite_prefix/$depbase" "$entry_dest"
+            done
+          }
+
+          enqueue "$PREFIX/bin/idevice_id" exe
+          enqueue "$PREFIX/bin/idevicebackup2" exe
+          # The two entry points are already in place under their
+          # triple-suffixed names, so seed relinking for them directly.
+          relink "$out/idevice_id-aarch64-apple-darwin" exe
+          relink "$out/idevicebackup2-aarch64-apple-darwin" exe
+
+          while [ -s "$worklist" ]; do
+            line="$(head -n1 "$worklist")"
+            sed -i '' '1d' "$worklist"
+            src="${line%%|*}"
+            rest="${line#*|}"
+            base="${rest%%|*}"
+            kind="${rest##*|}"
+            dest="$out/$base"
+            if [ ! -f "$dest" ]; then
+              cp "$src" "$dest"
+              chmod +w "$dest"
+              install_name_tool -id "@loader_path/$base" "$dest"
+            fi
+            relink "$dest" "$kind"
+          done
+          rm -f "$worklist" "$seenfile"
+
+          # externalBin lives here, not the committed tauri.conf.json - see
+          # the matching comment in the Windows sidecar step for why.
+          # `resources` is a flat Map, not a glob List - same reasoning as
+          # the Windows step above (glob form nests everything under a
+          # literal "_up_" subfolder instead of installing flat; verified
+          # locally).
+          json='{"bundle":{"externalBin":["../resources/bin/idevice_id","../resources/bin/idevicebackup2"],"resources":{'
+          first=1
+          for f in "$out"/*.dylib; do
+            name="$(basename "$f")"
+            [ "$first" = "1" ] && first=0 || json="$json,"
+            json="$json\"../resources/bin/$name\":\"$name\""
+          done
+          json="$json}}}"
+          echo "$json" > src-tauri/sidecar-config.json
+          cat src-tauri/sidecar-config.json
+          ls -la "$out"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -70,4 +242,6 @@ jobs:
           releaseBody: "See the assets below to download and install this version. Installers are unsigned unless noted otherwise - see the README for the Gatekeeper/SmartScreen \"open anyway\" steps."
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: >-
+            ${{ matrix.target != '' && format('--target {0}', matrix.target) || '' }}
+            ${{ matrix.sidecar != 'none' && '-c src-tauri/sidecar-config.json' || '' }}
