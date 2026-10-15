@@ -132,10 +132,15 @@ Building in order; each milestone lands as its own set of commits.
       produces a real, working `.msi` and `.exe` (NSIS) - both launch the
       actual app. macOS build/signing is configured but unverified here (no
       Mac available in this environment; CI will be the first real test).
-      Known gap: the `idevicebackup2`/`idevice_id`/ffmpeg/ImageMagick
-      sidecars aren't bundled yet (`externalBin`) - see
-      [`resources/bin/README.md`](resources/bin/README.md); until then,
-      device ingest works only when those tools are on `PATH`.
+      `idevice_id`/`idevicebackup2` are bundled as sidecars on Windows and
+      Apple Silicon macOS - see
+      [`resources/bin/README.md`](resources/bin/README.md), including the
+      Intel-Mac gap and the fact that ffmpeg/ImageMagick aren't wired in yet.
+      Device ingest on a build without them falls back to `PATH`.
+      iOS can only back up a whole phone, so Amber keeps that backup in its
+      own app-data folder between imports (see `SECURITY.md`): the first
+      import copies everything, later ones only what changed, and other
+      conversations can be picked from it without the phone connected.
 
 ## Architecture
 

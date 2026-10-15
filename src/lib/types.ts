@@ -68,6 +68,12 @@ export interface ConversationSummaryDto {
   display_name: string | null;
   is_group: boolean;
   message_count: number;
+  last_message_ts_unix_ms: number | null;
+}
+
+export interface DeviceBackupCacheDto {
+  path: string;
+  size_bytes: number;
 }
 
 export type SourceRequest =

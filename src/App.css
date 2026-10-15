@@ -483,6 +483,51 @@ body {
 .import-conversation-count {
   color: var(--text-secondary);
   font-size: 12px;
+  text-align: right;
+}
+
+.import-conversation-row {
+  gap: 12px;
+}
+
+.import-conversation-tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.import-search {
+  position: sticky;
+  top: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.import-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.import-cache {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.import-cache p {
+  margin: 0;
+  font-size: 13px;
 }
 
 .import-progress,

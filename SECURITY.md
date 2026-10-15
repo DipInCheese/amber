@@ -36,6 +36,17 @@ Amber's core security properties, in priority order:
    not a vulnerability report on its own. Treat `.amber` files like any other
    sensitive personal file.
 
+4. **The saved phone backup is plaintext on disk** (unless the phone's own
+   backup encryption is on). iOS can't back up less than the whole device,
+   so Amber keeps the result in its app-data folder
+   (`device-backups/` under the app's local data directory) so that later
+   imports are incremental and other conversations can be picked without the
+   phone. This is deliberate, not a vulnerability report on its own, but it
+   is a full copy of the phone's data: the import window shows its size and
+   has a **Delete saved backup** button. Anything that makes Amber leave one
+   behind after that button is pressed, or read outside that folder, is in
+   scope.
+
 Vulnerabilities in bundled third-party sidecars (`idevicebackup2`, `ffmpeg`,
 ImageMagick) should generally be reported upstream, but let us know too if
 Amber's use of them is what makes an issue exploitable.

@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   beginIngest,
   checkIngestPrerequisites,
+  clearDeviceBackupCache,
+  deviceBackupCacheInfo,
   ingestConversation,
   listIngestDevices,
   onBackupProgress,
 } from "../lib/api";
 import type {
   ConversationSummaryDto,
+  DeviceBackupCacheDto,
   OpenArchiveResult,
   PrerequisiteReportDto,
   SourceRequest,
 } from "../lib/types";
+import { filterConversations, formatBytes, formatLastActive } from "./conversationFilter";
 
 type SourceKind = "device" | "backup" | "live_mac";
 
@@ -65,6 +69,8 @@ export function ImportPanel({
   const [devices, setDevices] = useState<string[]>([]);
   const [password, setPassword] = useState("");
   const [backupPath, setBackupPath] = useState<string | null>(null);
+  const [cache, setCache] = useState<DeviceBackupCacheDto | null>(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -89,7 +95,10 @@ export function ImportPanel({
   const chooseKind = useCallback(
     async (kind: SourceKind) => {
       setPhase({ step: "configure", kind });
-      if (kind === "device") await refreshDevicePrereqs();
+      if (kind === "device") {
+        deviceBackupCacheInfo().then(setCache).catch(() => setCache(null));
+        await refreshDevicePrereqs();
+      }
       if (kind === "backup") {
         const path = await open({ directory: true, multiple: false });
         if (typeof path === "string") setBackupPath(path);
@@ -115,11 +124,38 @@ export function ImportPanel({
     setPhase({ step: "resolving", progress: null });
     try {
       const conversations = await beginIngest(source);
+      setSearch("");
       setPhase({ step: "pick-conversation", conversations });
     } catch (err) {
       setPhase({ step: "error", message: String(err) });
     }
   }, [phase, backupPath, password]);
+
+  /** Pick from the phone backup Amber already holds - no phone needed. */
+  const startResolveFromCache = useCallback(async () => {
+    if (!cache) return;
+    setPhase({ step: "resolving", progress: null });
+    try {
+      const conversations = await beginIngest({
+        type: "backup",
+        path: cache.path,
+        password: password || null,
+      });
+      setSearch("");
+      setPhase({ step: "pick-conversation", conversations });
+    } catch (err) {
+      setPhase({ step: "error", message: String(err) });
+    }
+  }, [cache, password]);
+
+  const deleteCache = useCallback(async () => {
+    try {
+      await clearDeviceBackupCache();
+      setCache(null);
+    } catch (err) {
+      setPhase({ step: "error", message: String(err) });
+    }
+  }, []);
 
   const pickConversation = useCallback(async (chatIdentifier: string) => {
     const outputPath = await save({
@@ -136,6 +172,11 @@ export function ImportPanel({
       setPhase({ step: "error", message: String(err) });
     }
   }, [onImported]);
+
+  const visibleConversations = useMemo(
+    () => (phase.step === "pick-conversation" ? filterConversations(phase.conversations, search) : []),
+    [phase, search],
+  );
 
   return (
     <div className="import-overlay">
@@ -195,12 +236,26 @@ export function ImportPanel({
               value={password}
               onChange={(e) => setPassword(e.currentTarget.value)}
             />
+            {cache && (
+              <div className="import-cache">
+                <p>
+                  Your phone's last backup ({formatBytes(cache.size_bytes)}) is saved on this
+                  computer. Choose a conversation from it without connecting your phone.
+                </p>
+                <button type="button" onClick={startResolveFromCache}>
+                  Choose from saved backup
+                </button>
+                <button type="button" onClick={deleteCache}>
+                  Delete saved backup
+                </button>
+              </div>
+            )}
             <button
               type="button"
               disabled={!prereqs?.idevice_id.ok || !prereqs.idevicebackup2.ok || !prereqs.platform.ok}
               onClick={startResolve}
             >
-              Back up and import
+              {cache ? "Update from phone (only changes are copied)" : "Back up phone and choose a conversation"}
             </button>
           </div>
         )}
@@ -235,23 +290,55 @@ export function ImportPanel({
                 ? `Backing up… ${phase.progress.toFixed(0)}%`
                 : "Reading conversations…"}
             </p>
+            {phase.progress !== null && (
+              <p className="import-note">
+                iOS can only back up the whole phone, not one conversation. This is saved on this
+                computer, so next time only what changed is copied, and you can pick other
+                conversations without connecting your phone.
+              </p>
+            )}
           </div>
         )}
 
         {phase.step === "pick-conversation" && (
           <div className="import-conversation-list">
             {phase.conversations.length === 0 && <p>No conversations found.</p>}
-            {phase.conversations.map((c) => (
+            {phase.conversations.length > 0 && (
+              <>
+                <input
+                  type="search"
+                  className="import-search"
+                  placeholder="Search by name, number or email"
+                  value={search}
+                  onChange={(e) => setSearch(e.currentTarget.value)}
+                  autoFocus
+                />
+                <p className="import-note">
+                  {visibleConversations.length === phase.conversations.length
+                    ? `${phase.conversations.length} conversations, most recent first.`
+                    : `${visibleConversations.length} of ${phase.conversations.length} conversations.`}
+                </p>
+              </>
+            )}
+            {visibleConversations.map((c) => (
               <button
                 type="button"
                 key={c.chat_identifier}
                 className="import-conversation-row"
                 onClick={() => pickConversation(c.chat_identifier)}
               >
-                <span>{c.display_name ?? c.chat_identifier}</span>
-                <span className="import-conversation-count">{c.message_count} messages</span>
+                <span>
+                  {c.display_name ?? c.chat_identifier}
+                  {c.is_group && <span className="import-conversation-tag">Group</span>}
+                </span>
+                <span className="import-conversation-count">
+                  {c.message_count} messages · {formatLastActive(c.last_message_ts_unix_ms)}
+                </span>
               </button>
             ))}
+            {phase.conversations.length > 0 && visibleConversations.length === 0 && (
+              <p>No conversations match "{search}".</p>
+            )}
           </div>
         )}
 

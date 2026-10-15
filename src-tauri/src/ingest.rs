@@ -4,7 +4,7 @@
 //! conversations, then parse and write the chosen one to a `.amber`.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use amber_core::{list_conversations, parse_conversation};
@@ -16,8 +16,8 @@ use amber_ingest::{
     check_prerequisites, list_devices, resolve_backup, resolve_device, resolve_live_mac,
     PrerequisiteReport, ResolvedSource,
 };
-use serde::Deserialize;
-use tauri::{AppHandle, Emitter, State};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::{open_and_store, AppState};
 use crate::dto::{ConversationSummaryDto, OpenArchiveResult, PrerequisiteReportDto};
@@ -48,6 +48,77 @@ pub fn check_ingest_prerequisites(app: AppHandle) -> PrerequisiteReportDto {
 pub fn list_ingest_devices(app: AppHandle) -> Result<Vec<String>, String> {
     let runner = SidecarCommandRunner::new(app);
     list_devices(&runner, &tools()).map_err(|err| err.to_string())
+}
+
+/// Where phone backups live between imports. iOS can only back up the whole
+/// device, so keeping the result here (instead of a throwaway temp dir) is
+/// what lets later imports of other conversations skip the phone entirely
+/// and a refresh transfer only what changed. It's Amber's own copy - the
+/// phone itself is never written to.
+fn device_backup_cache_root(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_local_data_dir()
+        .map(|dir| dir.join("device-backups"))
+        .map_err(|err| err.to_string())
+}
+
+fn dir_size(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| match entry.metadata() {
+            Ok(meta) if meta.is_dir() => dir_size(&entry.path()),
+            Ok(meta) => meta.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceBackupCacheDto {
+    /// A complete backup directory, usable as a `Backup` source path.
+    pub path: String,
+    pub size_bytes: u64,
+}
+
+/// The most recently refreshed complete phone backup Amber is holding, if
+/// any. Interrupted/partial backups (no `Manifest.plist` yet) don't count.
+#[tauri::command]
+pub fn device_backup_cache_info(app: AppHandle) -> Result<Option<DeviceBackupCacheDto>, String> {
+    let root = device_backup_cache_root(&app)?;
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return Ok(None);
+    };
+
+    let newest = entries
+        .flatten()
+        .filter(|entry| entry.path().join("Manifest.plist").is_file())
+        .filter_map(|entry| {
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((modified, entry.path()))
+        })
+        .max_by_key(|(modified, _)| *modified);
+
+    Ok(newest.map(|(_, path)| DeviceBackupCacheDto {
+        size_bytes: dir_size(&path),
+        path: path.to_string_lossy().into_owned(),
+    }))
+}
+
+/// Delete every cached phone backup (and drop any in-progress import that
+/// might still be reading from one).
+#[tauri::command]
+pub fn clear_device_backup_cache(app: AppHandle, state: State<IngestState>) -> Result<(), String> {
+    *state.pending.lock().unwrap() = None;
+
+    let root = device_backup_cache_root(&app)?;
+    match std::fs::remove_dir_all(&root) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.to_string()),
+    }
 }
 
 /// What the frontend sends to start an import - mirrors [`amber_ingest::Source`]
@@ -89,7 +160,7 @@ pub fn begin_ingest(
         }
         SourceRequest::Device { udid, password } => {
             let runner = SidecarCommandRunner::new(app.clone());
-            let backups_root = work_dir.path().join("device-backup");
+            let backups_root = device_backup_cache_root(&app)?;
             let progress_app = app.clone();
             resolve_device(
                 &runner,

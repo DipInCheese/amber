@@ -75,8 +75,10 @@ pub fn select_device(
 }
 
 /// Create or refresh (incremental - `idevicebackup2` only transfers changed
-/// data on subsequent runs) a full backup of `udid` into `backup_root`,
-/// reporting 0-100 progress via `on_progress` as it goes.
+/// data on subsequent runs, so `backup_root` should be a directory that
+/// outlives one import) a full backup of `udid` into `backup_root`,
+/// reporting 0-100 progress via `on_progress` as it goes. iOS offers no way
+/// to back up less than the whole device, so this is all-or-nothing.
 ///
 /// If the device already has encrypted backups turned on, `password` must
 /// be `Some` - passed via the `BACKUP_PASSWORD` environment variable
@@ -97,7 +99,11 @@ pub fn create_or_refresh_backup(
     std::fs::create_dir_all(backup_root)?;
 
     let backup_root_str = backup_root.to_string_lossy().into_owned();
-    let args = ["-u", udid, "backup", "--full", &backup_root_str];
+    // No `--full`: that forces the device to re-send everything even when
+    // `backup_root` already holds a previous backup. Without it,
+    // `idevicebackup2` only transfers what changed since the last one, so
+    // a cached backup makes refreshing cheap.
+    let args = ["-u", udid, "backup", &backup_root_str];
     let envs: Vec<(&str, &str)> = password
         .map(|password| vec![("BACKUP_PASSWORD", password)])
         .unwrap_or_default();
@@ -332,7 +338,6 @@ mod tests {
                 "-u",
                 "UDID123",
                 "backup",
-                "--full",
                 backup_root.path().to_string_lossy().as_ref()
             ]
         );

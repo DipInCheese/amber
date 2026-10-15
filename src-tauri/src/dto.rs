@@ -111,6 +111,7 @@ pub struct ConversationSummaryDto {
     pub display_name: Option<String>,
     pub is_group: bool,
     pub message_count: i64,
+    pub last_message_ts_unix_ms: Option<i64>,
 }
 
 impl From<amber_core::ConversationSummary> for ConversationSummaryDto {
@@ -120,6 +121,7 @@ impl From<amber_core::ConversationSummary> for ConversationSummaryDto {
             display_name: summary.display_name,
             is_group: summary.is_group,
             message_count: summary.message_count,
+            last_message_ts_unix_ms: summary.last_message_ts_unix_ms,
         }
     }
 }

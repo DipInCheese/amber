@@ -9,6 +9,7 @@ use imessage_database::tables::table::get_connection;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AmberCoreError;
+use crate::time::apple_ts_to_unix_ms;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConversationSummary {
@@ -17,9 +18,14 @@ pub struct ConversationSummary {
     /// More than one other participant in `chat_handle_join`.
     pub is_group: bool,
     pub message_count: i64,
+    /// When the newest message in the conversation was sent/received (Unix
+    /// ms), so a picker can show and sort by recency. `None` for an empty
+    /// conversation or one whose messages all carry Apple's "unset" date.
+    pub last_message_ts_unix_ms: Option<i64>,
 }
 
-/// List every conversation in the database at `db_path`, most active first.
+/// List every conversation in the database at `db_path`, most recently
+/// active first (ties broken by message count).
 pub fn list_conversations(db_path: &Path) -> Result<Vec<ConversationSummary>, AmberCoreError> {
     let db = get_connection(db_path)?;
 
@@ -28,18 +34,24 @@ pub fn list_conversations(db_path: &Path) -> Result<Vec<ConversationSummary>, Am
              c.chat_identifier,
              c.display_name,
              (SELECT COUNT(*) FROM chat_message_join m WHERE m.chat_id = c.ROWID) AS message_count,
-             (SELECT COUNT(*) FROM chat_handle_join h WHERE h.chat_id = c.ROWID) AS participant_count
+             (SELECT COUNT(*) FROM chat_handle_join h WHERE h.chat_id = c.ROWID) AS participant_count,
+             (SELECT MAX(msg.date)
+                FROM chat_message_join j
+                JOIN message msg ON msg.ROWID = j.message_id
+               WHERE j.chat_id = c.ROWID) AS last_date
          FROM chat c
-         ORDER BY message_count DESC",
+         ORDER BY COALESCE(last_date, 0) DESC, message_count DESC",
     )?;
 
     let rows = statement.query_map([], |row| {
         let display_name: Option<String> = row.get(1)?;
+        let last_date: Option<i64> = row.get(4)?;
         Ok(ConversationSummary {
             chat_identifier: row.get(0)?,
             display_name: display_name.filter(|name| !name.is_empty()),
             message_count: row.get(2)?,
             is_group: row.get::<_, i64>(3)? > 1,
+            last_message_ts_unix_ms: last_date.filter(|&raw| raw != 0).map(apple_ts_to_unix_ms),
         })
     })?;
 
@@ -70,14 +82,20 @@ mod tests {
             -- A 1:1 conversation with 2 messages.
             INSERT INTO chat (ROWID, chat_identifier, display_name) VALUES (1, '+15551234567', NULL);
             INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (1, 1);
-            INSERT INTO message (ROWID, guid, date) VALUES (1, 'm1', 0), (2, 'm2', 0);
+            -- Dates are nanoseconds since the Apple epoch (2001-01-01).
+            INSERT INTO message (ROWID, guid, date) VALUES
+                (1, 'm1', 600000000000000000), (2, 'm2', 700000000000000000);
             INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1), (1, 2);
 
-            -- A group conversation with 1 message and 3 other participants.
+            -- A group conversation with 1 message and 3 other participants,
+            -- more recent than the 1:1 even though it has fewer messages.
             INSERT INTO chat (ROWID, chat_identifier, display_name) VALUES (2, 'chat123456', 'Family');
             INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (2, 2), (2, 3), (2, 4);
-            INSERT INTO message (ROWID, guid, date) VALUES (3, 'm3', 0);
+            INSERT INTO message (ROWID, guid, date) VALUES (3, 'm3', 750000000000000000);
             INSERT INTO chat_message_join (chat_id, message_id) VALUES (2, 3);
+
+            -- A conversation with no messages at all.
+            INSERT INTO chat (ROWID, chat_identifier, display_name) VALUES (3, 'empty', NULL);
             ",
         )
         .unwrap();
@@ -85,19 +103,32 @@ mod tests {
     }
 
     #[test]
-    fn lists_conversations_most_active_first_with_group_detection() {
+    fn lists_conversations_most_recent_first_with_group_detection() {
         let db_path = build_fixture_db();
 
         let conversations = list_conversations(&db_path).unwrap();
 
-        assert_eq!(conversations.len(), 2);
-        assert_eq!(conversations[0].chat_identifier, "+15551234567");
-        assert_eq!(conversations[0].message_count, 2);
-        assert!(!conversations[0].is_group);
+        assert_eq!(conversations.len(), 3);
 
-        assert_eq!(conversations[1].chat_identifier, "chat123456");
-        assert_eq!(conversations[1].display_name.as_deref(), Some("Family"));
-        assert_eq!(conversations[1].message_count, 1);
-        assert!(conversations[1].is_group);
+        assert_eq!(conversations[0].chat_identifier, "chat123456");
+        assert_eq!(conversations[0].display_name.as_deref(), Some("Family"));
+        assert_eq!(conversations[0].message_count, 1);
+        assert!(conversations[0].is_group);
+        assert_eq!(
+            conversations[0].last_message_ts_unix_ms,
+            Some(1_728_307_200_000)
+        );
+
+        assert_eq!(conversations[1].chat_identifier, "+15551234567");
+        assert_eq!(conversations[1].message_count, 2);
+        assert!(!conversations[1].is_group);
+        assert_eq!(
+            conversations[1].last_message_ts_unix_ms,
+            Some(1_678_307_200_000)
+        );
+
+        assert_eq!(conversations[2].chat_identifier, "empty");
+        assert_eq!(conversations[2].message_count, 0);
+        assert_eq!(conversations[2].last_message_ts_unix_ms, None);
     }
 }

@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ConversationSummaryDto,
   DayBucketDto,
+  DeviceBackupCacheDto,
   MessageDto,
   OpenArchiveResult,
   PrerequisiteReportDto,
@@ -41,6 +42,15 @@ export function checkIngestPrerequisites(): Promise<PrerequisiteReportDto> {
 
 export function listIngestDevices(): Promise<string[]> {
   return invoke("list_ingest_devices");
+}
+
+/** The newest complete phone backup Amber is holding between imports, if any. */
+export function deviceBackupCacheInfo(): Promise<DeviceBackupCacheDto | null> {
+  return invoke("device_backup_cache_info");
+}
+
+export function clearDeviceBackupCache(): Promise<void> {
+  return invoke("clear_device_backup_cache");
 }
 
 export function beginIngest(source: SourceRequest): Promise<ConversationSummaryDto[]> {

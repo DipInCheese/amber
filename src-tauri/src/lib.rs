@@ -25,6 +25,8 @@ pub fn run() {
             commands::get_day_index,
             ingest::check_ingest_prerequisites,
             ingest::list_ingest_devices,
+            ingest::device_backup_cache_info,
+            ingest::clear_device_backup_cache,
             ingest::begin_ingest,
             ingest::ingest_conversation,
         ])
