@@ -187,6 +187,35 @@ fn identical_attachment_bytes_are_stored_once() {
 }
 
 #[test]
+fn attachments_keep_their_real_extension_even_when_the_source_file_has_none() {
+    // An iOS backup stores files under a bare hash with no extension, and
+    // staging copies are named after the message - neither says ".heic".
+    // The archive path must still carry the real extension (SPEC.md).
+    let work_dir = tempfile::tempdir().unwrap();
+    let extensionless_source = work_dir.path().join("0a1b2c3d4e5f");
+    std::fs::write(&extensionless_source, b"fake heic bytes").unwrap();
+
+    let mut input = sample_input(extensionless_source);
+    input.attachments[0].filename = Some("IMG_0001.HEIC".to_string());
+    input.attachments[0].mime_type = Some("image/heic".to_string());
+
+    let archive_path = work_dir.path().join("conversation.amber");
+    write_archive(&archive_path, &input).unwrap();
+
+    let archive = AmberArchive::open(&archive_path).unwrap();
+    let attachment = &archive.list_attachments().unwrap()[0];
+    assert!(
+        attachment.rel_path.ends_with(".heic"),
+        "got {}",
+        attachment.rel_path
+    );
+    assert_eq!(
+        archive.read_attachment(&attachment.rel_path).unwrap(),
+        b"fake heic bytes"
+    );
+}
+
+#[test]
 fn tampered_messages_db_fails_the_integrity_check() {
     let work_dir = tempfile::tempdir().unwrap();
     let attachment_path = write_synthetic_attachment(&work_dir, b"x");

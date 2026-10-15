@@ -53,6 +53,8 @@ pub(crate) fn open_and_store(path: &Path, state: &AppState) -> Result<OpenArchiv
             })
             .collect(),
         message_count: manifest.counts.messages,
+        attachments_imported: None,
+        attachments_missing: None,
     };
 
     *state.archive() = Some(archive);

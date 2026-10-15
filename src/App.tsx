@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import "./App.css";
 import { ConversationView } from "./ConversationView";
 import { ImportPanel } from "./import/ImportPanel";
+import { importSummary } from "./import/importSummary";
 import { OnboardingBanner } from "./OnboardingBanner";
 import { getDayIndex, openArchive, queryMessages } from "./lib/api";
 import type { DayBucketDto, MessageDto, OpenArchiveResult } from "./lib/types";
@@ -22,6 +23,7 @@ type LoadState =
 function App() {
   const [state, setState] = useState<LoadState>({ status: "empty" });
   const [importOpen, setImportOpen] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
 
   const loadCurrentArchive = useCallback(async (conversation: OpenArchiveResult) => {
     setState({ status: "loading" });
@@ -40,6 +42,7 @@ function App() {
     });
     if (!path || Array.isArray(path)) return;
 
+    setImportNotice(null);
     setState({ status: "loading" });
     try {
       const conversation = await openArchive(path);
@@ -52,6 +55,7 @@ function App() {
   const handleImported = useCallback(
     (conversation: OpenArchiveResult) => {
       setImportOpen(false);
+      setImportNotice(importSummary(conversation));
       void loadCurrentArchive(conversation);
     },
     [loadCurrentArchive],
@@ -77,6 +81,15 @@ function App() {
       </header>
 
       <OnboardingBanner />
+
+      {importNotice && (
+        <div className="import-notice" role="status">
+          <span>{importNotice}</span>
+          <button type="button" aria-label="Dismiss" onClick={() => setImportNotice(null)}>
+            ×
+          </button>
+        </div>
+      )}
 
       <main className="app-body">
         {state.status === "empty" && (

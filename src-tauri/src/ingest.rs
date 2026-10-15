@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use amber_core::{list_conversations, parse_conversation};
+use amber_core::{list_conversations, parse_conversation, DomainMessage};
 use amber_format::{
     write_archive, ArchiveInput, AttachmentInput, ConversationInput, MessageInput,
     ParticipantInput, SourceInput,
@@ -229,35 +229,10 @@ pub fn ingest_conversation(
         }
     }
 
-    // Resolve each attachment's bytes into a temp file for the writer to
-    // embed. Best-effort: an attachment amber-ingest can't locate (a
-    // partial/corrupt backup, an unusual path) is skipped rather than
-    // failing the whole import.
     let attachment_temp_dir = tempfile::tempdir().map_err(|err| err.to_string())?;
-    let mut attachments = Vec::new();
-    for message in &messages {
-        for (index, attachment_path) in message.attachment_paths.iter().enumerate() {
-            let Ok(bytes) = pending.resolved.attachment_bytes(attachment_path) else {
-                continue;
-            };
-            let temp_path = attachment_temp_dir
-                .path()
-                .join(format!("{}-{index}", message.guid));
-            std::fs::write(&temp_path, &bytes).map_err(|err| err.to_string())?;
-
-            attachments.push(AttachmentInput {
-                message_guid: message.guid.clone(),
-                source_path: temp_path,
-                mime_type: None,
-                filename: Path::new(attachment_path)
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned()),
-                width: None,
-                height: None,
-                duration_ms: None,
-            });
-        }
-    }
+    let (attachments, missing) =
+        collect_attachments(&pending.resolved, &messages, attachment_temp_dir.path());
+    let attachments_imported = attachments.len();
 
     let input = ArchiveInput {
         generator: format!("Amber {}", env!("CARGO_PKG_VERSION")),
@@ -301,5 +276,155 @@ pub fn ingest_conversation(
     drop(guard);
 
     let _ = app.emit("ingest://done", output_path.to_string_lossy().into_owned());
-    open_and_store(output_path, &archive_state)
+    let mut result = open_and_store(output_path, &archive_state)?;
+    result.attachments_imported = Some(attachments_imported);
+    result.attachments_missing = Some(missing);
+    Ok(result)
+}
+
+fn is_plugin_payload(attachment_path: &str) -> bool {
+    attachment_path
+        .to_ascii_lowercase()
+        .ends_with(".pluginpayloadattachment")
+}
+
+/// Point the writer at each attachment's bytes. An unencrypted backup or a
+/// live Mac already has them as plain files, which are referenced in place
+/// (no multi-GB temp copy); only decrypted ones go to scratch files under
+/// `scratch_dir`. Returns the attachments plus how many the source didn't
+/// actually contain (typically media that lives only in iCloud) - counted
+/// and reported rather than failing the import, or, as it once did,
+/// vanishing without a word.
+fn collect_attachments(
+    resolved: &ResolvedSource,
+    messages: &[DomainMessage],
+    scratch_dir: &Path,
+) -> (Vec<AttachmentInput>, usize) {
+    let mut attachments = Vec::new();
+    let mut missing = 0usize;
+
+    for message in messages {
+        for (index, attachment_path) in message.attachment_paths.iter().enumerate() {
+            // Rich-link / app-extension payloads: binary plists that back a
+            // link preview, not media anyone can view.
+            if is_plugin_payload(attachment_path) {
+                continue;
+            }
+
+            let scratch = scratch_dir.join(format!("{}-{index}", message.guid));
+            let Ok(source_path) = resolved.attachment_file(attachment_path, &scratch) else {
+                missing += 1;
+                continue;
+            };
+
+            let filename = Path::new(attachment_path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned());
+            // The viewer picks <img>/<video>/<audio> from this, so it has to
+            // be set - `None` would render every attachment as a plain link.
+            let mime_type = filename
+                .as_deref()
+                .map(crate::mime::guess_from_extension)
+                .filter(|mime| *mime != "application/octet-stream")
+                .map(str::to_string);
+
+            attachments.push(AttachmentInput {
+                message_guid: message.guid.clone(),
+                source_path,
+                mime_type,
+                filename,
+                width: None,
+                height: None,
+                duration_ms: None,
+            });
+        }
+    }
+
+    (attachments, missing)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use amber_ingest::{AttachmentLocator, IngestError};
+
+    /// Knows exactly one attachment, backed by a real file on disk.
+    struct OneFileLocator {
+        known_path: &'static str,
+        file: PathBuf,
+    }
+
+    impl AttachmentLocator for OneFileLocator {
+        fn resolve(&self, path: &str) -> Result<Vec<u8>, IngestError> {
+            if path == self.known_path {
+                Ok(std::fs::read(&self.file)?)
+            } else {
+                Err(IngestError::AttachmentNotFoundInBackup(path.to_string()))
+            }
+        }
+
+        fn existing_file(&self, path: &str) -> Option<PathBuf> {
+            (path == self.known_path).then(|| self.file.clone())
+        }
+    }
+
+    fn message(guid: &str, paths: &[&str]) -> DomainMessage {
+        DomainMessage {
+            guid: guid.to_string(),
+            text: None,
+            ts_unix_ms: 0,
+            sender: "me".to_string(),
+            is_from_me: true,
+            attachment_paths: paths.iter().map(ToString::to_string).collect(),
+        }
+    }
+
+    #[test]
+    fn recognises_link_preview_payloads_but_not_media() {
+        assert!(is_plugin_payload(
+            "~/Library/SMS/Attachments/db/11/at_0_X/DD7C.pluginPayloadAttachment"
+        ));
+        assert!(!is_plugin_payload(
+            "~/Library/SMS/Attachments/ab/12/GUID/IMG_0001.HEIC"
+        ));
+    }
+
+    #[test]
+    fn imports_found_media_with_a_mime_type_and_counts_the_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let photo = temp.path().join("on-disk-photo");
+        std::fs::write(&photo, b"heic bytes").unwrap();
+
+        let known = "~/Library/SMS/Attachments/ab/12/GUID/IMG_0001.HEIC";
+        let resolved = ResolvedSource::new(
+            temp.path().join("chat.db"),
+            None,
+            Box::new(OneFileLocator {
+                known_path: known,
+                file: photo.clone(),
+            }),
+        );
+        let messages = vec![message(
+            "m1",
+            &[
+                known,
+                // Referenced but not in the source (e.g. iCloud-only):
+                "~/Library/SMS/Attachments/cd/34/GUID/IMG_0002.jpeg",
+                // Link-preview payload: neither imported nor "missing".
+                "~/Library/SMS/Attachments/ef/56/GUID/x.pluginPayloadAttachment",
+            ],
+        )];
+
+        let scratch = temp.path().join("scratch");
+        std::fs::create_dir_all(&scratch).unwrap();
+        let (attachments, missing) = collect_attachments(&resolved, &messages, &scratch);
+
+        assert_eq!(missing, 1);
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].message_guid, "m1");
+        assert_eq!(attachments[0].filename.as_deref(), Some("IMG_0001.HEIC"));
+        assert_eq!(attachments[0].mime_type.as_deref(), Some("image/heic"));
+        // Referenced in place, not copied to scratch.
+        assert_eq!(attachments[0].source_path, photo);
+    }
 }

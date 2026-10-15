@@ -12,21 +12,31 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use crate::error::AmberFormatError;
-use crate::hash::sha256_hex;
+use crate::hash::{sha256_file, sha256_hex};
 use crate::manifest::{
     Manifest, ManifestConversation, ManifestCounts, ManifestExportedRange, ManifestIntegrity,
     ManifestParticipant, ManifestSource, FORMAT_VERSION,
 };
-use crate::model::ArchiveInput;
+use crate::model::{ArchiveInput, AttachmentInput};
 use crate::schema::{APPLICATION_ID, SCHEMA_SQL, SCHEMA_VERSION};
 
 /// Write `input` as a `.amber` archive at `output_path`, overwriting any
 /// existing file.
 pub fn write_archive(output_path: &Path, input: &ArchiveInput) -> Result<(), AmberFormatError> {
-    let db_bytes = build_messages_db(input)?;
+    // Hash every attachment once, streaming - media can be tens of GB, so
+    // nothing here may hold an attachment's bytes in memory.
+    let addressed = address_attachments(input)?;
+
+    let db_bytes = build_messages_db(input, &addressed)?;
     let db_sha256 = sha256_hex(&db_bytes);
 
-    let unique_attachments = dedupe_attachments(input)?;
+    // Identical media attached to several messages is embedded once.
+    let mut unique_attachments: BTreeMap<&str, (&Path, u64)> = BTreeMap::new();
+    for (attachment, address) in input.attachments.iter().zip(&addressed) {
+        unique_attachments
+            .entry(address.rel_path.as_str())
+            .or_insert((attachment.source_path.as_path(), address.byte_size));
+    }
 
     let manifest = build_manifest(input, &db_sha256)?;
     let manifest_json = serde_json::to_vec_pretty(&manifest)?;
@@ -43,37 +53,71 @@ pub fn write_archive(output_path: &Path, input: &ArchiveInput) -> Result<(), Amb
     zip.start_file("messages.db", compressible)?;
     zip.write_all(&db_bytes)?;
 
-    for (rel_path, bytes) in &unique_attachments {
-        zip.start_file(rel_path, stored)?;
-        zip.write_all(bytes)?;
+    for (rel_path, (source_path, byte_size)) in &unique_attachments {
+        // A single entry past 4 GiB needs the ZIP64 extension.
+        let options = if *byte_size > u64::from(u32::MAX) {
+            stored.large_file(true)
+        } else {
+            stored
+        };
+        zip.start_file(*rel_path, options)?;
+        let mut source = File::open(source_path)
+            .map_err(|_| AmberFormatError::AttachmentSourceMissing(source_path.to_path_buf()))?;
+        std::io::copy(&mut source, &mut zip)?;
     }
 
     zip.finish()?;
     Ok(())
 }
 
-/// Read and hash every attachment's source file once, keyed by the archive
-/// path it will be stored at, so identical media is embedded a single time
-/// even if it's attached to multiple messages.
-fn dedupe_attachments(input: &ArchiveInput) -> Result<BTreeMap<String, Vec<u8>>, AmberFormatError> {
-    let mut by_rel_path = BTreeMap::new();
-    for attachment in &input.attachments {
-        let (rel_path, bytes) = read_and_address_attachment(&attachment.source_path)?;
-        by_rel_path.entry(rel_path).or_insert(bytes);
-    }
-    Ok(by_rel_path)
+/// Where one attachment lives in the archive, worked out once up front.
+struct AddressedAttachment {
+    rel_path: String,
+    sha256: String,
+    byte_size: u64,
 }
 
-fn read_and_address_attachment(source_path: &Path) -> Result<(String, Vec<u8>), AmberFormatError> {
-    let bytes = std::fs::read(source_path)
-        .map_err(|_| AmberFormatError::AttachmentSourceMissing(source_path.to_path_buf()))?;
-    let sha256 = sha256_hex(&bytes);
-    let ext = source_path
-        .extension()
+/// Content-address every attachment (SHA-256, streamed), parallel to
+/// `input.attachments`.
+fn address_attachments(input: &ArchiveInput) -> Result<Vec<AddressedAttachment>, AmberFormatError> {
+    input
+        .attachments
+        .iter()
+        .map(|attachment| {
+            let (sha256, byte_size) = sha256_file(&attachment.source_path).map_err(|_| {
+                AmberFormatError::AttachmentSourceMissing(attachment.source_path.clone())
+            })?;
+            let rel_path = format!(
+                "attachments/{}/{sha256}.{}",
+                &sha256[0..2],
+                attachment_extension(attachment)
+            );
+            Ok(AddressedAttachment {
+                rel_path,
+                sha256,
+                byte_size,
+            })
+        })
+        .collect()
+}
+
+/// The extension an attachment is stored under (`SPEC.md`:
+/// `attachments/<2 hex>/<sha256>.<ext>`). The real filename's wins: the
+/// source file is often a staging copy or a backup blob with no extension
+/// at all, which used to turn every photo into `.bin`.
+fn attachment_extension(attachment: &AttachmentInput) -> String {
+    attachment
+        .filename
+        .as_deref()
+        .map(Path::new)
+        .and_then(Path::extension)
+        .or_else(|| attachment.source_path.extension())
         .and_then(|ext| ext.to_str())
-        .unwrap_or("bin");
-    let prefix = &sha256[0..2];
-    Ok((format!("attachments/{prefix}/{sha256}.{ext}"), bytes))
+        .map(str::to_ascii_lowercase)
+        .filter(|ext| {
+            !ext.is_empty() && ext.len() <= 8 && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+        .unwrap_or_else(|| "bin".to_string())
 }
 
 fn build_manifest(input: &ArchiveInput, db_sha256: &str) -> Result<Manifest, AmberFormatError> {
@@ -121,7 +165,10 @@ fn build_manifest(input: &ArchiveInput, db_sha256: &str) -> Result<Manifest, Amb
 
 /// Build `messages.db` in a temp file (SQLite needs a real file path, not
 /// just bytes in memory) and return its final on-disk bytes.
-fn build_messages_db(input: &ArchiveInput) -> Result<Vec<u8>, AmberFormatError> {
+fn build_messages_db(
+    input: &ArchiveInput,
+    addressed: &[AddressedAttachment],
+) -> Result<Vec<u8>, AmberFormatError> {
     let temp_file = tempfile::NamedTempFile::new()?;
     let temp_path = temp_file.into_temp_path();
 
@@ -133,7 +180,7 @@ fn build_messages_db(input: &ArchiveInput) -> Result<Vec<u8>, AmberFormatError> 
 
         let participant_ids = insert_participants(&db, input)?;
         let message_ids = insert_messages(&db, input, &participant_ids)?;
-        insert_attachments(&db, input, &message_ids)?;
+        insert_attachments(&db, input, &message_ids, addressed)?;
         insert_reactions(&db, input, &participant_ids)?;
         rebuild_fts(&db)?;
         build_day_index(&db)?;
@@ -208,21 +255,20 @@ fn insert_attachments(
     db: &Connection,
     input: &ArchiveInput,
     message_ids: &HashMap<String, i64>,
+    addressed: &[AddressedAttachment],
 ) -> Result<(), AmberFormatError> {
     let mut stmt = db.prepare(
         "INSERT INTO attachment
             (message_id, sha256, rel_path, mime_type, filename, byte_size, width, height, duration_ms)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )?;
-    for attachment in &input.attachments {
+    for (attachment, address) in input.attachments.iter().zip(addressed) {
         let message_id = message_ids.get(&attachment.message_guid).ok_or_else(|| {
             AmberFormatError::UnknownSender(
                 attachment.message_guid.clone(),
                 "<attachment target message>".to_string(),
             )
         })?;
-        let (rel_path, bytes) = read_and_address_attachment(&attachment.source_path)?;
-        let sha256 = sha256_hex(&bytes);
         let filename = attachment.filename.clone().or_else(|| {
             attachment
                 .source_path
@@ -233,11 +279,11 @@ fn insert_attachments(
 
         stmt.execute((
             message_id,
-            &sha256,
-            &rel_path,
+            &address.sha256,
+            &address.rel_path,
             &attachment.mime_type,
             &filename,
-            bytes.len() as i64,
+            address.byte_size as i64,
             attachment.width,
             attachment.height,
             attachment.duration_ms,

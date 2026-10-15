@@ -4,36 +4,66 @@
 //! `<img>`/`<video>` tags directly at attachment paths without Amber ever
 //! copying media out into the web layer.
 
-use tauri::{http, Manager, UriSchemeContext, Wry};
+use tauri::{http, AppHandle, Manager, UriSchemeContext, UriSchemeResponder, Wry};
 
 use crate::commands::AppState;
+use crate::heic;
 use crate::mime::guess_from_extension;
 
 pub const SCHEME: &str = "amber-attachment";
 
+/// Registered as an *asynchronous* scheme: reading a large video out of the
+/// archive or decoding a photo must not run on the thread that drives the
+/// UI, or scrolling a conversation full of media would stutter.
 pub fn handle_request(
     ctx: UriSchemeContext<'_, Wry>,
     request: http::Request<Vec<u8>>,
-) -> http::Response<Vec<u8>> {
+    responder: UriSchemeResponder,
+) {
+    let app = ctx.app_handle().clone();
+    std::thread::spawn(move || responder.respond(respond(&app, &request)));
+}
+
+fn respond(app: &AppHandle, request: &http::Request<Vec<u8>>) -> http::Response<Vec<u8>> {
     // e.g. "/attachments/ab/abcdef....heic" -> "attachments/ab/abcdef....heic"
     let rel_path = request.uri().path().trim_start_matches('/');
     let rel_path = percent_decode(rel_path);
 
-    let state = ctx.app_handle().state::<AppState>();
-    let guard = state.archive();
-    let Some(archive) = guard.as_ref() else {
-        return not_found("no archive is open");
+    // Hold the archive lock only for the read itself, not for any decoding.
+    let read = {
+        let state = app.state::<AppState>();
+        let guard = state.archive();
+        let Some(archive) = guard.as_ref() else {
+            return not_found("no archive is open");
+        };
+        archive.read_attachment(&rel_path)
+    };
+    let bytes = match read {
+        Ok(bytes) => bytes,
+        Err(err) => return not_found(&err.to_string()),
     };
 
-    match archive.read_attachment(&rel_path) {
-        Ok(bytes) => http::Response::builder()
-            .status(http::StatusCode::OK)
-            .header(http::header::CONTENT_TYPE, guess_from_extension(&rel_path))
-            .header(http::header::CONTENT_LENGTH, bytes.len())
-            .body(bytes)
-            .unwrap_or_else(|_| not_found("failed to build response")),
-        Err(err) => not_found(&err.to_string()),
+    let (bytes, content_type) = displayable(&rel_path, bytes);
+    http::Response::builder()
+        .status(http::StatusCode::OK)
+        .header(http::header::CONTENT_TYPE, content_type)
+        .header(http::header::CONTENT_LENGTH, bytes.len())
+        .body(bytes)
+        .unwrap_or_else(|_| not_found("failed to build response"))
+}
+
+/// The bytes and content type to actually send. Everything is served as
+/// stored, except HEIC photos where the webview can't decode them (see
+/// `heic.rs`): those get a JPEG rendition if one can be made, and fall back
+/// to the original bytes - which the viewer then shows as a plain file - if
+/// it can't.
+fn displayable(rel_path: &str, bytes: Vec<u8>) -> (Vec<u8>, &'static str) {
+    if heic::is_heic(rel_path) {
+        if let Some(jpeg) = heic::to_jpeg(&bytes) {
+            return (jpeg, "image/jpeg");
+        }
     }
+    (bytes, guess_from_extension(rel_path))
 }
 
 fn not_found(message: &str) -> http::Response<Vec<u8>> {

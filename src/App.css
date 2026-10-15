@@ -275,6 +275,31 @@ body {
   font-size: 13px;
 }
 
+.attachment-note {
+  opacity: 0.7;
+  text-decoration: none;
+}
+
+.import-notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.import-notice button {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
 /* Timeline scrubber (M4) */
 
 .timeline-scrubber {

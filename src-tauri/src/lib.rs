@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 mod commands;
 mod dto;
+mod heic;
 mod ingest;
 mod mime;
 mod protocol;
@@ -18,7 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(AppState::default())
         .manage(IngestState::default())
-        .register_uri_scheme_protocol(protocol::SCHEME, protocol::handle_request)
+        .register_asynchronous_uri_scheme_protocol(protocol::SCHEME, protocol::handle_request)
         .invoke_handler(tauri::generate_handler![
             commands::open_archive,
             commands::query_messages,

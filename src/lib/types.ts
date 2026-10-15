@@ -49,6 +49,9 @@ export interface OpenArchiveResult {
   is_group: boolean;
   participants: ParticipantDto[];
   message_count: number;
+  /** Set only right after an import; `null` when an archive is just opened. */
+  attachments_imported: number | null;
+  attachments_missing: number | null;
 }
 
 export interface PrerequisiteStatusDto {

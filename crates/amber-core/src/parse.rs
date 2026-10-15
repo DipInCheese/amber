@@ -63,9 +63,13 @@ pub fn parse_conversation(
             message.apply_body(body);
         }
 
+        // `path()` is the stored on-device path ("~/Library/SMS/Attachments/
+        // ab/12/GUID/IMG_0001.HEIC") - what a backup/live Mac is keyed by.
+        // Not `filename()`: that prefers `transfer_name`, a bare display name
+        // ("IMG_0001.HEIC") that identifies nothing on disk.
         let attachment_paths = Attachment::from_message(&db, &message)?
             .into_iter()
-            .filter_map(|attachment| attachment.filename().map(str::to_string))
+            .filter_map(|attachment| attachment.path().map(|p| p.to_string_lossy().into_owned()))
             .collect();
 
         let sender = if message.is_from_me() {
@@ -212,6 +216,22 @@ mod tests {
         )
         .unwrap();
 
+        // Message 1 also carries a photo: `filename` is the stored on-device
+        // path, `transfer_name` just the display name.
+        db.execute(
+            "INSERT INTO attachment
+                (ROWID, guid, filename, uti, mime_type, transfer_name, total_bytes, is_sticker, hide_attachment)
+             VALUES (1, 'att-1', '~/Library/SMS/Attachments/ab/12/GUID-1/IMG_0001.HEIC',
+                     'public.heic', 'image/heic', 'IMG_0001.HEIC', 1234, 0, 0)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO message_attachment_join (message_id, attachment_id) VALUES (1, 1)",
+            [],
+        )
+        .unwrap();
+
         // Message 2: empty `text`, real body only in `attributedBody` - from
         // the database owner. Proves attributedBody decoding end-to-end.
         db.execute(
@@ -253,6 +273,22 @@ mod tests {
         assert_eq!(messages[1].text.as_deref(), Some("Noter test"));
         assert!(messages[1].is_from_me);
         assert_eq!(messages[1].sender, "me");
+    }
+
+    #[test]
+    fn attachments_are_reported_by_stored_path_not_display_name() {
+        let db_path = build_fixture_db();
+
+        let messages = parse_conversation(&db_path, "+15551234567").unwrap();
+
+        // The stored path is what a backup's Manifest.db / a live Mac's disk
+        // is keyed by. The bare display name ("IMG_0001.HEIC") matches
+        // nothing there - reporting that silently dropped every attachment.
+        assert_eq!(
+            messages[0].attachment_paths,
+            vec!["~/Library/SMS/Attachments/ab/12/GUID-1/IMG_0001.HEIC"]
+        );
+        assert!(messages[1].attachment_paths.is_empty());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { useState } from "react";
 import { attachmentUrl } from "../lib/api";
 import type { AttachmentDto, MessageDto } from "../lib/types";
 import { formatTime } from "./formatting";
@@ -7,35 +8,59 @@ import { reactionGlyph } from "./reactionIcon";
 function AttachmentView({ attachment }: { attachment: AttachmentDto }) {
   const url = attachmentUrl(attachment.rel_path);
   const mime = attachment.mime_type ?? "";
+  // The archive keeps the original bytes whatever the format, but the
+  // webview can only *show* what its own decoders support (iPhone photos
+  // are often HEIC, videos HEVC). When it can't, say so and keep the file
+  // reachable instead of leaving a broken image.
+  const [cannotPreview, setCannotPreview] = useState(false);
 
-  if (mime.startsWith("image/")) {
+  const isMedia =
+    mime.startsWith("image/") || mime.startsWith("video/") || mime.startsWith("audio/");
+
+  if (isMedia && !cannotPreview) {
+    if (mime.startsWith("image/")) {
+      return (
+        <img
+          className="attachment attachment-image"
+          src={url}
+          alt={attachment.filename ?? "attachment"}
+          loading="lazy"
+          width={attachment.width ?? undefined}
+          height={attachment.height ?? undefined}
+          onError={() => setCannotPreview(true)}
+        />
+      );
+    }
+
+    if (mime.startsWith("video/")) {
+      return (
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <video
+          className="attachment attachment-video"
+          src={url}
+          controls
+          preload="metadata"
+          onError={() => setCannotPreview(true)}
+        />
+      );
+    }
+
+    // eslint-disable-next-line jsx-a11y/media-has-caption
     return (
-      <img
-        className="attachment attachment-image"
+      <audio
+        className="attachment attachment-audio"
         src={url}
-        alt={attachment.filename ?? "attachment"}
-        loading="lazy"
-        width={attachment.width ?? undefined}
-        height={attachment.height ?? undefined}
+        controls
+        preload="metadata"
+        onError={() => setCannotPreview(true)}
       />
     );
-  }
-
-  if (mime.startsWith("video/")) {
-    return (
-      // eslint-disable-next-line jsx-a11y/media-has-caption
-      <video className="attachment attachment-video" src={url} controls preload="metadata" />
-    );
-  }
-
-  if (mime.startsWith("audio/")) {
-    // eslint-disable-next-line jsx-a11y/media-has-caption
-    return <audio className="attachment attachment-audio" src={url} controls preload="metadata" />;
   }
 
   return (
     <a className="attachment attachment-file" href={url} target="_blank" rel="noreferrer">
       {attachment.filename ?? "Attachment"}
+      {cannotPreview && <span className="attachment-note"> - can't be previewed here</span>}
     </a>
   );
 }

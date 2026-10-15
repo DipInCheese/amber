@@ -31,3 +31,15 @@ amber-ingest.workspace = true
 tempfile.workspace = true
 tauri-plugin-shell = "2"
 
+# HEIC -> JPEG for display (src/heic.rs): WebView2 can't decode HEIC, but the
+# Windows Imaging Component can once the HEIF extension is installed. Same
+# version tauri already pulls in, so no second copy of the crate.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Imaging",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Memory",
+] }
+

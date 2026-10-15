@@ -4,7 +4,7 @@
 //! unless the device owner turned on encrypted backups) and encrypted ones.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crabapple::backup::models::auth::Authentication;
 use crabapple::backup::models::file::BackupFileEntry;
@@ -80,10 +80,11 @@ struct BackupAttachmentLocator {
     attachments_by_relative_path: HashMap<String, BackupFileEntry>,
 }
 
-impl AttachmentLocator for BackupAttachmentLocator {
-    fn resolve(&self, path: &str) -> Result<Vec<u8>, IngestError> {
-        // `imessage-database` reports the on-device path
-        // (e.g. "/var/mobile/Library/SMS/Attachments/ab/01/GUID/photo.heic");
+impl BackupAttachmentLocator {
+    fn find_entry(&self, path: &str) -> Option<&BackupFileEntry> {
+        // `imessage-database` reports the stored on-device path - on a phone
+        // "~/Library/SMS/Attachments/ab/01/GUID/photo.heic", elsewhere
+        // sometimes "/var/mobile/Library/SMS/Attachments/...".
         // Manifest.db keys attachments by their path relative to the
         // "Library/SMS/Attachments" root. Match on that common suffix
         // rather than assuming either side's exact prefix.
@@ -92,12 +93,27 @@ impl AttachmentLocator for BackupAttachmentLocator {
             .map(|(_, suffix)| format!("Library/SMS/Attachments{suffix}"))
             .unwrap_or_else(|| path.to_string());
 
+        self.attachments_by_relative_path.get(&relative_path)
+    }
+}
+
+impl AttachmentLocator for BackupAttachmentLocator {
+    fn resolve(&self, path: &str) -> Result<Vec<u8>, IngestError> {
         let entry = self
-            .attachments_by_relative_path
-            .get(&relative_path)
+            .find_entry(path)
             .ok_or_else(|| IngestError::AttachmentNotFoundInBackup(path.to_string()))?;
 
         read_entry(&self.backup, entry)
+    }
+
+    fn existing_file(&self, path: &str) -> Option<PathBuf> {
+        // An encrypted backup's files are ciphertext - those must go
+        // through `resolve` to be decrypted.
+        if self.backup.is_encrypted() {
+            return None;
+        }
+        let entry = self.find_entry(path)?;
+        Some(self.backup.backup_path.join(entry.source())).filter(|file| file.is_file())
     }
 }
 
@@ -244,6 +260,25 @@ mod tests {
             .attachment_bytes("/var/mobile/Library/SMS/Attachments/ab/01/GUID/photo.heic")
             .unwrap();
         assert_eq!(attachment_bytes, b"fake heic bytes");
+    }
+
+    #[test]
+    fn resolves_the_phones_tilde_paths_and_references_the_backups_own_file() {
+        let backup_dir = tempfile::tempdir().unwrap();
+        let work_dir = tempfile::tempdir().unwrap();
+        build_synthetic_backup(backup_dir.path(), b"fake sqlite bytes", b"fake heic bytes");
+        let resolved = resolve(backup_dir.path(), None, work_dir.path()).unwrap();
+
+        // sms.db on a real phone stores "~/Library/SMS/Attachments/...".
+        let scratch = work_dir.path().join("scratch-attachment");
+        let file = resolved
+            .attachment_file("~/Library/SMS/Attachments/ab/01/GUID/photo.heic", &scratch)
+            .unwrap();
+
+        assert_eq!(std::fs::read(&file).unwrap(), b"fake heic bytes");
+        // An unencrypted backup's file is referenced in place, not copied.
+        assert!(file.starts_with(backup_dir.path()));
+        assert!(!scratch.exists());
     }
 
     #[test]

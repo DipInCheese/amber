@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::error::IngestError;
 
@@ -60,6 +60,21 @@ impl ResolvedSource {
     pub fn attachment_bytes(&self, path: &str) -> Result<Vec<u8>, IngestError> {
         self.attachments.resolve(path)
     }
+
+    /// A readable file holding one attachment's bytes. Where the source
+    /// already has such a file (an unencrypted backup's own copy, a live
+    /// Mac's real path) that's returned directly, so a conversation with
+    /// tens of GB of media isn't staged a second time; otherwise the bytes
+    /// are produced (decrypted) into `scratch_file`. Callers must only read
+    /// the returned path, never modify or delete it.
+    pub fn attachment_file(&self, path: &str, scratch_file: &Path) -> Result<PathBuf, IngestError> {
+        if let Some(existing) = self.attachments.existing_file(path) {
+            return Ok(existing);
+        }
+        let bytes = self.attachments.resolve(path)?;
+        std::fs::write(scratch_file, bytes)?;
+        Ok(scratch_file.to_path_buf())
+    }
 }
 
 /// Resolves the on-device attachment path reported by `imessage-database`
@@ -73,4 +88,12 @@ impl ResolvedSource {
 /// concurrently, so `Send` (movable into that command's task) is enough.
 pub trait AttachmentLocator: Send {
     fn resolve(&self, path: &str) -> Result<Vec<u8>, IngestError>;
+
+    /// A file on disk that already holds this attachment's plaintext bytes,
+    /// if the source has one - so callers can reference it instead of
+    /// copying. `None` means "go through [`resolve`](Self::resolve)": the
+    /// attachment is missing, or its bytes have to be produced (decrypted).
+    fn existing_file(&self, _path: &str) -> Option<PathBuf> {
+        None
+    }
 }

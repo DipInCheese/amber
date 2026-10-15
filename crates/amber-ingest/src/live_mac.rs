@@ -61,13 +61,22 @@ struct LiveMacAttachmentLocator {
     home: PathBuf,
 }
 
-impl AttachmentLocator for LiveMacAttachmentLocator {
-    fn resolve(&self, path: &str) -> Result<Vec<u8>, IngestError> {
-        let expanded = match path.strip_prefix("~/") {
+impl LiveMacAttachmentLocator {
+    fn expand(&self, path: &str) -> PathBuf {
+        match path.strip_prefix("~/") {
             Some(rest) => self.home.join(rest),
             None => PathBuf::from(path),
-        };
-        Ok(std::fs::read(&expanded)?)
+        }
+    }
+}
+
+impl AttachmentLocator for LiveMacAttachmentLocator {
+    fn resolve(&self, path: &str) -> Result<Vec<u8>, IngestError> {
+        Ok(std::fs::read(self.expand(path))?)
+    }
+
+    fn existing_file(&self, path: &str) -> Option<PathBuf> {
+        Some(self.expand(path)).filter(|expanded| expanded.is_file())
     }
 }
 

@@ -59,6 +59,13 @@ pub struct OpenArchiveResult {
     pub is_group: bool,
     pub participants: Vec<ParticipantDto>,
     pub message_count: i64,
+    /// Only set right after an import (not when re-opening an existing
+    /// archive): how many attachments were copied into the archive...
+    pub attachments_imported: Option<usize>,
+    /// ...and how many the source referenced but didn't contain - typically
+    /// media that lives only in iCloud. Link-preview payloads aren't media
+    /// and aren't counted in either number.
+    pub attachments_missing: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]

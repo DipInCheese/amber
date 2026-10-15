@@ -141,6 +141,12 @@ Building in order; each milestone lands as its own set of commits.
       own app-data folder between imports (see `SECURITY.md`): the first
       import copies everything, later ones only what changed, and other
       conversations can be picked from it without the phone connected.
+      Attachments are stored in the archive exactly as the phone had them.
+      For display, Windows converts HEIC photos to JPEG on the fly (needs
+      Microsoft's free "HEIF Image Extensions"; without it, or for any
+      format the webview can't play, the viewer shows a plain file link
+      instead). Media that exists only in iCloud isn't in a phone backup, so
+      the import reports how many attachments were missing.
 
 ## Architecture
 
