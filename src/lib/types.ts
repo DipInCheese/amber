@@ -71,6 +71,6 @@ export interface ConversationSummaryDto {
 }
 
 export type SourceRequest =
-  | { type: "device"; udid: string | null; password: string | null }
+  | { type: "device"; udid: string | null; password: string | null; work_dir: string | null }
   | { type: "backup"; path: string; password: string | null }
   | { type: "live_mac" };

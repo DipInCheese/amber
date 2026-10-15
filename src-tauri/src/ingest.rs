@@ -60,6 +60,10 @@ pub enum SourceRequest {
     Device {
         udid: Option<String>,
         password: Option<String>,
+        /// Folder to hold the temporary full device backup (can be tens of
+        /// GB). Defaults to the system temp dir, which is often a small
+        /// system drive.
+        work_dir: Option<String>,
     },
     Backup {
         path: String,
@@ -77,7 +81,16 @@ pub fn begin_ingest(
     source: SourceRequest,
     state: State<IngestState>,
 ) -> Result<Vec<ConversationSummaryDto>, String> {
-    let work_dir = tempfile::tempdir().map_err(|err| err.to_string())?;
+    let work_dir = match &source {
+        SourceRequest::Device {
+            work_dir: Some(dir),
+            ..
+        } => tempfile::Builder::new()
+            .prefix("amber-")
+            .tempdir_in(dir)
+            .map_err(|err| format!("cannot use {dir} for the backup: {err}"))?,
+        _ => tempfile::tempdir().map_err(|err| err.to_string())?,
+    };
 
     let resolved = match source {
         SourceRequest::LiveMac => {
@@ -87,10 +100,11 @@ pub fn begin_ingest(
             resolve_backup(Path::new(&path), password, work_dir.path())
                 .map_err(|err| err.to_string())?
         }
-        SourceRequest::Device { udid, password } => {
+        SourceRequest::Device { udid, password, .. } => {
             let runner = SidecarCommandRunner::new(app.clone());
             let backups_root = work_dir.path().join("device-backup");
             let progress_app = app.clone();
+            let log_app = app.clone();
             resolve_device(
                 &runner,
                 &tools(),
@@ -100,6 +114,9 @@ pub fn begin_ingest(
                 work_dir.path(),
                 move |percent| {
                     let _ = progress_app.emit("ingest://backup-progress", percent);
+                },
+                move |line| {
+                    let _ = log_app.emit("ingest://backup-log", line);
                 },
             )
             .map_err(|err| err.to_string())?

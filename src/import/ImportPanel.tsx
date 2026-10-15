@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   beginIngest,
   checkIngestPrerequisites,
   ingestConversation,
   listIngestDevices,
+  onBackupLog,
   onBackupProgress,
 } from "../lib/api";
 import type {
@@ -15,6 +16,8 @@ import type {
   PrerequisiteReportDto,
   SourceRequest,
 } from "../lib/types";
+
+const MAX_LOG_LINES = 500;
 
 type SourceKind = "device" | "backup" | "live_mac";
 
@@ -31,6 +34,20 @@ type Phase =
   | { step: "pick-conversation"; conversations: ConversationSummaryDto[] }
   | { step: "writing" }
   | { step: "error"; message: string };
+
+function LogView({ lines }: { lines: string[] }) {
+  const endRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [lines]);
+  if (lines.length === 0) return null;
+  return (
+    <pre className="import-log">
+      {lines.join("\n")}
+      <span ref={endRef} />
+    </pre>
+  );
+}
 
 function PrerequisiteRow({
   label,
@@ -71,6 +88,8 @@ export function ImportPanel({
   const [devices, setDevices] = useState<string[]>([]);
   const [password, setPassword] = useState("");
   const [backupPath, setBackupPath] = useState<string | null>(null);
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const [deviceWorkDir, setDeviceWorkDir] = useState<string | null>(null);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -82,6 +101,21 @@ export function ImportPanel({
       unlisten = fn;
     });
     return () => unlisten?.();
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    onBackupLog((line) => {
+      setLogLines((prev) => [...prev, line].slice(-MAX_LOG_LINES));
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   const refreshDevicePrereqs = useCallback(async () => {
@@ -115,9 +149,10 @@ export function ImportPanel({
       if (!backupPath) return;
       source = { type: "backup", path: backupPath, password: password || null };
     } else {
-      source = { type: "device", udid: null, password: password || null };
+      source = { type: "device", udid: null, password: password || null, work_dir: deviceWorkDir };
     }
 
+    setLogLines([]);
     setPhase({ step: "resolving", progress: null });
     try {
       const conversations = await beginIngest(source);
@@ -125,7 +160,7 @@ export function ImportPanel({
     } catch (err) {
       setPhase({ step: "error", message: String(err) });
     }
-  }, [phase, backupPath, password]);
+  }, [phase, backupPath, password, deviceWorkDir]);
 
   const pickConversation = useCallback(async (chatIdentifier: string) => {
     const outputPath = await save({
@@ -201,6 +236,19 @@ export function ImportPanel({
               value={password}
               onChange={(e) => setPassword(e.currentTarget.value)}
             />
+            <p>
+              Temporary backup location: {deviceWorkDir ?? "system temp folder"}. A full backup
+              needs as much free space as the phone has used - pick a drive with room.
+            </p>
+            <button
+              type="button"
+              onClick={async () => {
+                const dir = await open({ directory: true, multiple: false });
+                if (typeof dir === "string") setDeviceWorkDir(dir);
+              }}
+            >
+              Choose location
+            </button>
             <button
               type="button"
               disabled={!prereqs?.idevice_id.ok || !prereqs.idevicebackup2.ok || !prereqs.platform.ok}
@@ -241,6 +289,7 @@ export function ImportPanel({
                 ? `Backing up… ${phase.progress.toFixed(0)}%`
                 : "Reading conversations…"}
             </p>
+            <LogView lines={logLines} />
           </div>
         )}
 
@@ -266,6 +315,7 @@ export function ImportPanel({
         {phase.step === "error" && (
           <div className="import-error">
             <p>{phase.message}</p>
+            <LogView lines={logLines} />
             <button type="button" onClick={() => setPhase({ step: "choose" })}>
               Start over
             </button>

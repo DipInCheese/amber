@@ -46,7 +46,7 @@ pub fn resolve_live_mac(work_dir: &Path) -> Result<ResolvedSource, IngestError> 
 
 /// Create or refresh a backup of the device identified by `udid` (or the
 /// sole connected device, if `None`) into `backups_root`, reporting 0-100
-/// progress via `on_progress`, then resolve it exactly like
+/// progress via `on_progress` (and the tool's log lines via `on_log`), then resolve it exactly like
 /// [`resolve_backup`].
 #[allow(clippy::too_many_arguments)]
 pub fn resolve_device(
@@ -57,6 +57,7 @@ pub fn resolve_device(
     backups_root: &Path,
     work_dir: &Path,
     on_progress: impl FnMut(f32),
+    on_log: impl FnMut(&str),
 ) -> Result<ResolvedSource, IngestError> {
     let udid = device::select_device(runner, tools, udid)?;
     let backup_dir = device::create_or_refresh_backup(
@@ -66,6 +67,7 @@ pub fn resolve_device(
         backups_root,
         password,
         on_progress,
+        on_log,
     )?;
     backup::resolve(&backup_dir, password.map(str::to_string), work_dir)
 }

@@ -54,6 +54,11 @@ export function ingestConversation(
   return invoke("ingest_conversation", { chatIdentifier, outputPath });
 }
 
+/** One line of `idevicebackup2` output (stdout/stderr) while a device backup runs. */
+export function onBackupLog(handler: (line: string) => void): Promise<UnlistenFn> {
+  return listen<string>("ingest://backup-log", (event) => handler(event.payload));
+}
+
 /** 0-100 progress while `begin_ingest` is creating/refreshing a device backup. */
 export function onBackupProgress(handler: (percent: number) => void): Promise<UnlistenFn> {
   return listen<number>("ingest://backup-progress", (event) => handler(event.payload));
