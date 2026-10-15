@@ -24,6 +24,11 @@ name: build-sidecars
 # natively cross-build for it on an Apple Silicon runner.
 on:
   workflow_dispatch:
+    inputs:
+      from_git:
+        description: 'Windows: build libimobiledevice from upstream git instead of the old MSYS2 1.3.0 package'
+        type: boolean
+        default: true
 
 jobs:
   windows:
@@ -40,6 +45,28 @@ jobs:
           export PATH="/usr/bin:/mingw64/bin:$PATH"
           pacman -Sy --noconfirm
           pacman -S --noconfirm mingw-w64-x86_64-libimobiledevice
+
+          # MSYS2 only packages the 2020 libimobiledevice 1.3.0 release, whose
+          # mobilebackup2 handshake fails on current iOS with "Could not
+          # perform backup protocol version exchange, error code -1". Rebuild
+          # the stack from upstream git on top of it (the package above
+          # supplies openssl/zlib/etc.) and overwrite it in /mingw64.
+          if [ "${{ inputs.from_git }}" = "true" ]; then
+            pacman -S --noconfirm --needed git make autoconf automake libtool pkgconf \
+              mingw-w64-x86_64-toolchain mingw-w64-x86_64-curl mingw-w64-x86_64-openssl
+            export MSYSTEM=MINGW64
+            export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig
+            src=/c/imd-src
+            mkdir -p "$src"
+            for repo in libplist libimobiledevice-glue libtatsu libusbmuxd libimobiledevice; do
+              git clone --depth 1 "https://github.com/libimobiledevice/$repo.git" "$src/$repo"
+              (cd "$src/$repo" \
+                && echo "$repo @ $(git rev-parse --short HEAD)" \
+                && ./autogen.sh --prefix=/mingw64 --disable-static --enable-shared --without-cython \
+                && make -j"$(nproc)" \
+                && make install)
+            done
+          fi
 
           out=/c/sidecar-out
           mkdir -p "$out"

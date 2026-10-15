@@ -18,6 +18,12 @@ import type {
 
 type SourceKind = "device" | "backup" | "live_mac";
 
+const isMacOS =
+  typeof navigator !== "undefined" &&
+  /mac/i.test(navigator.platform || navigator.userAgent || "");
+
+const platformPrereqLabel = isMacOS ? "Full Disk Access" : "USB driver";
+
 type Phase =
   | { step: "choose" }
   | { step: "configure"; kind: SourceKind }
@@ -178,7 +184,7 @@ export function ImportPanel({
                   remediationUrl={prereqs.idevicebackup2.remediation_url}
                 />
                 <PrerequisiteRow
-                  label="USB driver"
+                  label={platformPrereqLabel}
                   ok={prereqs.platform.ok}
                   guidance={prereqs.platform.guidance}
                   remediationUrl={prereqs.platform.remediation_url}

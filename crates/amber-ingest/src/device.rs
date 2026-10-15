@@ -112,11 +112,29 @@ pub fn create_or_refresh_backup(
         return Err(IngestError::ToolFailed {
             tool: "idevicebackup2",
             status: "non-zero exit".to_string(),
-            stderr: output.stderr,
+            stderr: with_backup_hint(output.stderr),
         });
     }
 
     Ok(backup_root.join(udid))
+}
+
+/// `idevicebackup2` fails the `mobilebackup2` handshake with
+/// "Could not perform backup protocol version exchange" when the phone
+/// refuses the session after the service itself started - almost always
+/// because the phone is locked / waiting on a passcode or Trust prompt, or
+/// (less often) because the bundled libimobiledevice is too old for the
+/// phone's iOS version. The raw tool output doesn't say any of that.
+fn with_backup_hint(stderr: String) -> String {
+    if stderr.contains("protocol version exchange") {
+        format!(
+            "{stderr}\n\nThe iPhone rejected the backup session. Unlock it, keep the screen on, \
+             accept any \"Trust This Computer\" or passcode prompt, then try again. If it keeps \
+             failing, the bundled libimobiledevice may be too old for this iOS version."
+        )
+    } else {
+        stderr
+    }
 }
 
 /// Extracts a `NN%` (or `NN.N%`) progress percentage from one line of
@@ -401,6 +419,30 @@ mod tests {
             |_| {},
         );
         assert!(matches!(result, Err(IngestError::ToolFailed { .. })));
+    }
+
+    #[test]
+    fn create_or_refresh_backup_hints_on_version_exchange_failure() {
+        let runner = FakeCommandRunner {
+            stdout_lines: vec![],
+            success: false,
+            stderr: "Could not perform backup protocol version exchange, error code -1".to_string(),
+            last_call: Mutex::new(None),
+        };
+        let backup_root = tempfile::tempdir().unwrap();
+
+        let err = create_or_refresh_backup(
+            &runner,
+            &tools(),
+            "UDID123",
+            backup_root.path(),
+            None,
+            |_| {},
+        )
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("version exchange"));
+        assert!(message.contains("Unlock"));
     }
 
     #[test]
