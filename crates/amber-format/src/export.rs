@@ -406,6 +406,12 @@ fn escape_html(text: &str) -> String {
     escaped
 }
 
+/// Timeline scrollbar styles and script for the HTML export (see
+/// `export_timeline.js`). Plain files so they can be read and linted as what
+/// they are.
+const HTML_TIMELINE_STYLE: &str = include_str!("export_timeline.css");
+const HTML_TIMELINE_SCRIPT: &str = include_str!("export_timeline.js");
+
 const HTML_STYLE: &str = "
 body{font:15px/1.4 -apple-system,'Segoe UI',Roboto,sans-serif;margin:0;background:#f2f2f7;color:#111}
 header{position:sticky;top:0;background:#fffc;backdrop-filter:blur(8px);padding:12px 20px;border-bottom:1px solid #ddd}
@@ -448,7 +454,7 @@ pub fn write_html(
         out,
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-         <title>{title}</title><style>{HTML_STYLE}</style></head><body>"
+         <title>{title}</title><style>{HTML_STYLE}{HTML_TIMELINE_STYLE}</style></head><body>"
     )?;
     writeln!(
         out,
@@ -460,9 +466,16 @@ pub fn write_html(
     for message in &conversation.messages {
         let moment = clock(message.timestamp_unix_ms);
         if moment.date != current_day {
+            // One wrapper per day: the timeline scrollbar jumps between
+            // these (and the browser can skip drawing the ones off-screen,
+            // which is what keeps a 100,000-message page usable).
+            if !current_day.is_empty() {
+                writeln!(out, "</section>")?;
+            }
             writeln!(
                 out,
-                "<div class=\"date\">{}</div>",
+                "<section class=\"day\" data-ts=\"{}\"><div class=\"date\">{}</div>",
+                message.timestamp_unix_ms,
                 escape_html(&moment.date)
             )?;
             current_day = moment.date.clone();
@@ -518,7 +531,18 @@ pub fn write_html(
         writeln!(out, "</div>")?;
     }
 
-    writeln!(out, "</main></body></html>")
+    if !current_day.is_empty() {
+        writeln!(out, "</section>")?;
+    }
+    writeln!(out, "</main>")?;
+    // The timeline scrollbar. Hidden until its script runs, so the page is
+    // still a plain, scrollable document without JavaScript. The script is a
+    // fixed string - nothing from the conversation is ever placed inside it.
+    writeln!(
+        out,
+        "<div id=\"timeline\"><div id=\"tl-track\" role=\"slider\" tabindex=\"0\" \n         aria-label=\"Timeline\" aria-orientation=\"vertical\">\n         <div id=\"tl-thumb\"><div id=\"tl-label\" aria-hidden=\"true\"></div>\n         <div id=\"tl-handle\"></div></div></div></div>"
+    )?;
+    writeln!(out, "<script>{HTML_TIMELINE_SCRIPT}</script></body></html>")
 }
 
 fn write_html_attachment(
@@ -669,6 +693,57 @@ mod tests {
         assert!(!html.contains("<script>alert"));
         // Without media, attachments are just named.
         assert!(html.contains("[IMG_0001.HEIC]"));
+    }
+
+    #[test]
+    fn html_wraps_each_day_in_a_section_for_the_timeline() {
+        let html = to_string(|out| write_html(&sample(), &utc_clock, &|_| None, out));
+
+        // The sample spans two days: two balanced sections, each carrying the
+        // timestamp of its first message for the timeline to read. (Only the
+        // page itself is counted - the script's comments mention the tag too.)
+        let page = html.split("<script>").next().unwrap();
+        assert_eq!(page.matches("<section class=\"day\"").count(), 2);
+        assert_eq!(page.matches("</section>").count(), 2);
+        assert!(html.contains("<section class=\"day\" data-ts=\"1709647331000\">"));
+        assert!(html.contains("<section class=\"day\" data-ts=\"1709733731000\">"));
+        assert!(html.contains("id=\"tl-track\""));
+    }
+
+    #[test]
+    fn html_timeline_script_is_ours_alone_and_the_page_works_without_it() {
+        let html = to_string(|out| write_html(&sample(), &utc_clock, &|_| None, out));
+
+        // Exactly one script element - the exporter's own. A message that
+        // contains "<script>" is escaped text, never a second script.
+        assert_eq!(html.matches("<script>").count(), 1);
+        assert!(html.contains("\"use strict\""));
+        // Hidden until the script runs, so a no-JS reader still gets a normal page.
+        assert!(html.contains("#timeline{display:none}"));
+        assert!(html.contains("html.has-timeline #timeline{display:block"));
+    }
+
+    #[test]
+    fn html_for_an_empty_conversation_is_still_a_valid_page() {
+        let empty = ExportConversation {
+            messages: vec![],
+            ..sample()
+        };
+        let html = to_string(|out| write_html(&empty, &utc_clock, &|_| None, out));
+
+        assert!(html.contains("0 messages"));
+        assert_eq!(
+            html.split("<script>")
+                .next()
+                .unwrap()
+                .matches("<section")
+                .count(),
+            0
+        );
+        assert!(html.ends_with(
+            "</script></body></html>
+"
+        ));
     }
 
     #[test]

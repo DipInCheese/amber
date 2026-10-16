@@ -1,0 +1,23 @@
+
+:root{--tl-accent:#0a84ff;--tl-fg:#1c1c1e;--tl-bg:#f2f2f7;--tl-muted:#6e6e73;--tl-line:#d1d1d6}
+@media(prefers-color-scheme:dark){:root{--tl-fg:#f2f2f7;--tl-bg:#000;--tl-muted:#98989d;--tl-line:#38383a}}
+section.day{content-visibility:auto;contain-intrinsic-size:auto 480px}
+/* content-visibility makes each day its own stacking context, which would otherwise paint over the sticky header. */
+header{z-index:10}
+#timeline{display:none}
+html.has-timeline{scrollbar-width:none}
+html.has-timeline::-webkit-scrollbar{display:none}
+html.has-timeline body{padding-right:56px}
+html.has-timeline #timeline{display:block;position:fixed;top:0;right:0;bottom:0;width:56px;z-index:20;user-select:none;-webkit-user-select:none}
+#tl-track{position:absolute;top:var(--tl-top,64px);bottom:14px;left:0;right:0;cursor:pointer;touch-action:none}
+#tl-track:focus-visible{outline:2px solid var(--tl-accent);outline-offset:-2px;border-radius:6px}
+.tl-tick{position:absolute;right:6px;width:6px;height:1px;background:var(--tl-line);transform:translateY(-50%)}
+.tl-tick-year{width:auto;height:auto;background:none;pointer-events:none}
+.tl-tick-year span{font-size:10px;font-weight:700;color:var(--tl-muted)}
+#tl-thumb{position:absolute;top:0;left:0;right:0;height:0;will-change:transform;transition:transform 220ms cubic-bezier(.2,.8,.2,1);pointer-events:none}
+.is-dragging #tl-thumb{transition:none}
+#tl-handle{position:absolute;top:-4px;left:10px;width:30px;height:8px;border-radius:4px;background:var(--tl-accent);box-shadow:0 1px 4px rgba(0,0,0,.3);transition:transform 140ms cubic-bezier(.2,.8,.2,1)}
+.is-dragging #tl-handle{transform:scale(1.2,1.35)}
+#tl-label{position:absolute;top:0;right:calc(100% - 4px);padding:9px 16px;border-radius:14px;background:var(--tl-fg);color:var(--tl-bg);font-size:16px;font-weight:650;white-space:nowrap;box-shadow:0 8px 26px rgba(0,0,0,.28);opacity:0;transform:translate(10px,-50%) scale(.9);transform-origin:right center;transition:opacity 120ms ease,transform 160ms cubic-bezier(.2,.8,.2,1)}
+.is-dragging #tl-label{opacity:1;transform:translate(0,-50%) scale(1)}
+@media(prefers-reduced-motion:reduce){#tl-thumb,#tl-handle,#tl-label{transition:none}}

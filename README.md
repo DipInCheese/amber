@@ -150,8 +150,9 @@ Building in order; each milestone lands as its own set of commits.
       In the viewer, click a photo to open it full-screen (arrow keys step
       through every photo and video; each has a Download button that saves
       the original file), and use **Export…** to write the conversation as
-      HTML (optionally with its media in a folder beside it), plain text,
-      CSV or JSON. The `.amber` file itself is unchanged by any of this.
+      HTML (optionally with its media in a folder beside it; the page has
+      the same draggable timeline scrollbar as the app and works offline),
+      plain text, CSV or JSON. The `.amber` file itself is unchanged by any of this.
 
 ## Architecture
 
