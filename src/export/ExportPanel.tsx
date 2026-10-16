@@ -4,6 +4,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   exportConversation,
+  onExportLog,
   onExportProgress,
   type ExportFormat,
   type ExportProgress,
@@ -11,13 +12,14 @@ import {
 } from "../lib/api";
 import { safeFileName } from "../lib/media";
 import { IconCheck, IconCheckCircle, IconFile, IconWarning } from "../ui/icons";
+import { appendLog, LogView } from "../ui/LogView";
 import { ProgressBar } from "../ui/ProgressBar";
 import { Sheet, SheetClose } from "../ui/Sheet";
-import { describeExport, EXPORT_FORMATS } from "./exportSummary";
+import { describeExport, describeExportProgress, EXPORT_FORMATS } from "./exportSummary";
 
 type Phase =
   | { step: "choose" }
-  | { step: "exporting"; progress: ExportProgress | null }
+  | { step: "exporting"; progress: ExportProgress | null; withMedia: boolean; startedAt: number }
   | { step: "done"; summary: ExportSummary }
   | { step: "error"; message: string };
 
@@ -26,18 +28,41 @@ export function ExportPanel({ title, onClose }: { title: string; onClose: () => 
   const [format, setFormat] = useState<ExportFormat>("html");
   const [includeMedia, setIncludeMedia] = useState(true);
   const [phase, setPhase] = useState<Phase>({ step: "choose" });
+  const [log, setLog] = useState<string[]>([]);
+  const [showLog, setShowLog] = useState(true);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     onExportProgress((progress) => {
-      setPhase((current) => (current.step === "exporting" ? { step: "exporting", progress } : current));
+      setPhase((current) => (current.step === "exporting" ? { ...current, progress } : current));
     }).then((fn) => (cancelled ? fn() : (unlisten = fn)));
     return () => {
       cancelled = true;
       unlisten?.();
     };
   }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    onExportLog((line) => setLog((lines) => appendLog(lines, line))).then((fn) =>
+      cancelled ? fn() : (unlisten = fn),
+    );
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // A running clock, so a long export visibly isn't stuck.
+  const exporting = phase.step === "exporting";
+  useEffect(() => {
+    if (!exporting) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [exporting]);
 
   const info = EXPORT_FORMATS.find((f) => f.id === format) ?? EXPORT_FORMATS[0];
 
@@ -48,9 +73,12 @@ export function ExportPanel({ title, onClose }: { title: string; onClose: () => 
     });
     if (!outputPath) return;
 
-    setPhase({ step: "exporting", progress: null });
+    const withMedia = format === "html" && includeMedia;
+    setLog([]);
+    setNow(Date.now());
+    setPhase({ step: "exporting", progress: null, withMedia, startedAt: Date.now() });
     try {
-      const summary = await exportConversation(format, format === "html" && includeMedia, outputPath);
+      const summary = await exportConversation(format, withMedia, outputPath);
       setPhase({ step: "done", summary });
     } catch (err) {
       setPhase({ step: "error", message: String(err) });
@@ -127,23 +155,31 @@ export function ExportPanel({ title, onClose }: { title: string; onClose: () => 
 
   if (phase.step === "exporting") {
     sheetTitle = "Exporting…";
-    footer = <SheetClose>Close</SheetClose>;
-    const fraction =
-      phase.progress && phase.progress.total > 0 ? phase.progress.done / phase.progress.total : null;
-    const label =
-      phase.progress && phase.progress.total > 0
-        ? `Copying media… ${phase.progress.done.toLocaleString()} of ${phase.progress.total.toLocaleString()}`
-        : "Writing the file…";
+    footer = (
+      <>
+        <button type="button" className="btn btn-plain" onClick={() => setShowLog((v) => !v)}>
+          {showLog ? "Hide details" : "Show details"}
+        </button>
+        <SheetClose>Close</SheetClose>
+      </>
+    );
+    const view = describeExportProgress(phase.progress, phase.withMedia);
+    const elapsed = Math.max(0, Math.round((now - phase.startedAt) / 1000));
+    const percent = view.fraction === null ? null : Math.floor(view.fraction * 100);
     body = (
       <div className="busy">
         <div className="busy-head">
           <div className="spinner" aria-hidden="true" />
-          <div>
-            <p className="busy-title">{label}</p>
-            <p className="note">Amber stays usable while this runs.</p>
+          <div className="busy-text">
+            <p className="busy-title">{view.label}</p>
+            <p className="note">
+              {view.step}
+              {percent !== null && ` · ${percent}%`} · {elapsed}s · Amber stays usable while this runs.
+            </p>
           </div>
         </div>
-        <ProgressBar fraction={fraction} label={label} />
+        <ProgressBar fraction={view.fraction} label={view.label} />
+        {showLog && <LogView lines={log} />}
       </div>
     );
   }
@@ -159,16 +195,19 @@ export function ExportPanel({ title, onClose }: { title: string; onClose: () => 
       </>
     );
     body = (
-      <div className="list-group">
-        <div className="list-row">
-          <span className="tile tile-success">
-            <IconCheckCircle />
-          </span>
-          <span className="list-row-text">
-            <span className="list-row-title">Your conversation is ready</span>
-            <span className="list-row-detail">{describeExport(phase.summary)}</span>
-          </span>
+      <div className="stack">
+        <div className="list-group">
+          <div className="list-row">
+            <span className="tile tile-success">
+              <IconCheckCircle />
+            </span>
+            <span className="list-row-text">
+              <span className="list-row-title">Your conversation is ready</span>
+              <span className="list-row-detail">{describeExport(phase.summary)}</span>
+            </span>
+          </div>
         </div>
+        {log.length > 0 && <LogView lines={log} />}
       </div>
     );
   }

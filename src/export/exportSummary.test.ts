@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { describeExport, EXPORT_FORMATS } from "./exportSummary";
+import { describeExport, describeExportProgress, EXPORT_FORMATS } from "./exportSummary";
 
 const base = { path: "C:/out.html", messages: 1, media_files: 0, media_failed: 0 };
 
@@ -25,5 +25,22 @@ describe("EXPORT_FORMATS", () => {
   it("offers each format once with a distinct extension", () => {
     expect(new Set(EXPORT_FORMATS.map((f) => f.id)).size).toBe(EXPORT_FORMATS.length);
     expect(new Set(EXPORT_FORMATS.map((f) => f.extension)).size).toBe(EXPORT_FORMATS.length);
+  });
+});
+
+describe("describeExportProgress", () => {
+  it("counts the steps, with a media step only when media is copied", () => {
+    expect(describeExportProgress(null, true)).toMatchObject({ step: "Step 1 of 3", fraction: null });
+    expect(describeExportProgress({ stage: "media", done: 5, total: 20 }, true)).toMatchObject({
+      step: "Step 2 of 3",
+      fraction: 0.25,
+    });
+    const writing = describeExportProgress({ stage: "writing", done: 50, total: 100 }, false);
+    expect(writing).toMatchObject({ step: "Step 2 of 2", fraction: 0.5 });
+    expect(writing.label).toContain("Writing messages");
+  });
+
+  it("has no fraction for an empty stage", () => {
+    expect(describeExportProgress({ stage: "writing", done: 0, total: 0 }, false).fraction).toBeNull();
   });
 });

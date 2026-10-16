@@ -238,6 +238,16 @@ pub fn write_text(
     clock: Clock<'_>,
     out: &mut dyn Write,
 ) -> std::io::Result<()> {
+    write_text_with_progress(conversation, clock, out, &mut |_| {})
+}
+
+/// Like [`write_text`], calling `on_message(n)` as it reaches the n-th message.
+pub fn write_text_with_progress(
+    conversation: &ExportConversation,
+    clock: Clock<'_>,
+    out: &mut dyn Write,
+    on_message: &mut dyn FnMut(usize),
+) -> std::io::Result<()> {
     writeln!(out, "{}", conversation.title)?;
     writeln!(
         out,
@@ -246,7 +256,8 @@ pub fn write_text(
     )?;
 
     let mut current_day = String::new();
-    for message in &conversation.messages {
+    for (index, message) in conversation.messages.iter().enumerate() {
+        on_message(index + 1);
         let moment = clock(message.timestamp_unix_ms);
         if moment.date != current_day {
             writeln!(out, "\n=== {} ===", moment.date)?;
@@ -303,6 +314,16 @@ pub fn write_csv(
     clock: Clock<'_>,
     out: &mut dyn Write,
 ) -> std::io::Result<()> {
+    write_csv_with_progress(conversation, clock, out, &mut |_| {})
+}
+
+/// Like [`write_csv`], calling `on_message(n)` as it reaches the n-th message.
+pub fn write_csv_with_progress(
+    conversation: &ExportConversation,
+    clock: Clock<'_>,
+    out: &mut dyn Write,
+    on_message: &mut dyn FnMut(usize),
+) -> std::io::Result<()> {
     // A byte-order mark lets Excel open the file as UTF-8 instead of
     // mangling emoji and accents.
     out.write_all(b"\xEF\xBB\xBF")?;
@@ -310,7 +331,8 @@ pub fn write_csv(
         out,
         "timestamp_utc,date,time,sender,direction,text,attachments,edited,unsent,reactions"
     )?;
-    for message in &conversation.messages {
+    for (index, message) in conversation.messages.iter().enumerate() {
+        on_message(index + 1);
         let moment = clock(message.timestamp_unix_ms);
         let attachments = message
             .attachments
@@ -353,7 +375,25 @@ pub fn write_csv(
 struct JsonExport<'a> {
     format: &'static str,
     conversation: JsonConversation<'a>,
+    messages: CountedMessages<'a>,
+}
+
+/// The message list, reporting each one as it is written.
+struct CountedMessages<'a> {
     messages: &'a [ExportMessage],
+    on_message: std::cell::RefCell<&'a mut dyn FnMut(usize)>,
+}
+
+impl Serialize for CountedMessages<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq = serializer.serialize_seq(Some(self.messages.len()))?;
+        for (index, message) in self.messages.iter().enumerate() {
+            seq.serialize_element(message)?;
+            (self.on_message.borrow_mut())(index + 1);
+        }
+        seq.end()
+    }
 }
 
 #[derive(Serialize)]
@@ -365,6 +405,15 @@ struct JsonConversation<'a> {
 }
 
 pub fn write_json(conversation: &ExportConversation, out: &mut dyn Write) -> std::io::Result<()> {
+    write_json_with_progress(conversation, out, &mut |_| {})
+}
+
+/// Like [`write_json`], calling `on_message(n)` after writing the n-th message.
+pub fn write_json_with_progress(
+    conversation: &ExportConversation,
+    out: &mut dyn Write,
+    on_message: &mut dyn FnMut(usize),
+) -> std::io::Result<()> {
     let export = JsonExport {
         format: "amber-export",
         conversation: JsonConversation {
@@ -373,7 +422,10 @@ pub fn write_json(conversation: &ExportConversation, out: &mut dyn Write) -> std
             is_group: conversation.is_group,
             message_count: conversation.messages.len(),
         },
-        messages: &conversation.messages,
+        messages: CountedMessages {
+            messages: &conversation.messages,
+            on_message: std::cell::RefCell::new(on_message),
+        },
     };
     serde_json::to_writer_pretty(&mut *out, &export).map_err(std::io::Error::other)?;
     writeln!(out)
@@ -449,6 +501,17 @@ pub fn write_html(
     media: &dyn Fn(&ExportAttachment) -> Option<MediaLinks>,
     out: &mut dyn Write,
 ) -> std::io::Result<()> {
+    write_html_with_progress(conversation, clock, media, out, &mut |_| {})
+}
+
+/// Like [`write_html`], calling `on_message(n)` as it reaches the n-th message.
+pub fn write_html_with_progress(
+    conversation: &ExportConversation,
+    clock: Clock<'_>,
+    media: &dyn Fn(&ExportAttachment) -> Option<MediaLinks>,
+    out: &mut dyn Write,
+    on_message: &mut dyn FnMut(usize),
+) -> std::io::Result<()> {
     let title = escape_html(&conversation.title);
     writeln!(
         out,
@@ -463,7 +526,8 @@ pub fn write_html(
     )?;
 
     let mut current_day = String::new();
-    for message in &conversation.messages {
+    for (index, message) in conversation.messages.iter().enumerate() {
+        on_message(index + 1);
         let moment = clock(message.timestamp_unix_ms);
         if moment.date != current_day {
             // One wrapper per day: the timeline scrollbar jumps between

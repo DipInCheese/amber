@@ -18,9 +18,10 @@ mod writer;
 
 pub use error::AmberFormatError;
 pub use export::{
-    system_clock, utc_clock, write_csv, write_html, write_json, write_text, Clock,
-    ExportAttachment, ExportConversation, ExportFormat, ExportMessage, ExportReaction, LocalTime,
-    MediaLinks,
+    system_clock, utc_clock, write_csv, write_csv_with_progress, write_html,
+    write_html_with_progress, write_json, write_json_with_progress, write_text,
+    write_text_with_progress, Clock, ExportAttachment, ExportConversation, ExportFormat,
+    ExportMessage, ExportReaction, LocalTime, MediaLinks,
 };
 pub use manifest::{
     Manifest, ManifestConversation, ManifestCounts, ManifestExportedRange, ManifestIntegrity,

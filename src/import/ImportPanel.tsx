@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   beginIngest,
   checkIngestPrerequisites,
@@ -34,6 +34,7 @@ import {
   IconWarning,
   IconComputer,
 } from "../ui/icons";
+import { appendLog, LogView } from "../ui/LogView";
 import { ProgressBar } from "../ui/ProgressBar";
 import { Sheet, SheetClose } from "../ui/Sheet";
 import { filterConversations, formatBytes, formatLastActive } from "./conversationFilter";
@@ -50,7 +51,6 @@ type Phase =
   | { step: "error"; message: string };
 
 const BACKUP_DIR_KEY = "amber:backup-dir";
-const LOG_LIMIT = 500;
 
 function readStoredBackupDir(): string | null {
   try {
@@ -103,19 +103,6 @@ function CheckRow({
 
 function statusOk(...statuses: PrerequisiteStatusDto[]): boolean {
   return statuses.every((status) => status.ok);
-}
-
-function LogView({ lines }: { lines: string[] }) {
-  const ref = useRef<HTMLPreElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [lines]);
-  return (
-    <pre ref={ref} className="log-view selectable" aria-label="Details">
-      {lines.length > 0 ? lines.join("\n") : "Waiting for the first message from the phone…"}
-    </pre>
-  );
 }
 
 function Busy({
@@ -191,11 +178,7 @@ export function ImportPanel({
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     onBackupLog((line) => {
-      setLog((lines) => {
-        const next = lines.length >= LOG_LIMIT ? lines.slice(lines.length - LOG_LIMIT + 1) : lines.slice();
-        next.push(line);
-        return next;
-      });
+      setLog((lines) => appendLog(lines, line));
     }).then((fn) => (cancelled ? fn() : (unlisten = fn)));
     return () => {
       cancelled = true;
@@ -590,7 +573,7 @@ export function ImportPanel({
         }
         fraction={phase.progress !== null ? phase.progress / 100 : null}
       >
-        {showLog && <LogView lines={log} />}
+        {showLog && <LogView lines={log} empty="Waiting for the first message from the phone…" />}
       </Busy>
     );
   }
@@ -706,7 +689,7 @@ export function ImportPanel({
             <button type="button" className="btn btn-plain btn-sm align-start" onClick={() => setShowLog((v) => !v)}>
               {showLog ? "Hide details" : "Show details"}
             </button>
-            {showLog && <LogView lines={log} />}
+            {showLog && <LogView lines={log} empty="No details were recorded." />}
           </>
         )}
       </div>

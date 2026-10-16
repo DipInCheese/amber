@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { ExportFormat, ExportSummary } from "../lib/api";
+import type { ExportFormat, ExportProgress, ExportSummary } from "../lib/api";
 
 export interface ExportFormatInfo {
   id: ExportFormat;
@@ -51,4 +51,30 @@ export function describeExport(summary: ExportSummary): string {
     } only named in the page.`;
   }
   return text;
+}
+
+export interface ExportProgressView {
+  /** What is happening, with counts. */
+  label: string;
+  /** "Step 2 of 3". */
+  step: string;
+  /** 0-1 for a determinate bar, `null` when there's no meaningful fraction. */
+  fraction: number | null;
+}
+
+/**
+ * What to show while an export runs. `withMedia` says whether a
+ * media-copying step comes before the messages are written.
+ */
+export function describeExportProgress(progress: ExportProgress | null, withMedia: boolean): ExportProgressView {
+  const steps = withMedia ? 3 : 2;
+  if (progress === null || progress.stage === "reading") {
+    return { label: "Reading the conversation…", step: `Step 1 of ${steps}`, fraction: null };
+  }
+  const counted = (verb: string, step: number): ExportProgressView => ({
+    label: `${verb} ${progress.done.toLocaleString()} of ${progress.total.toLocaleString()}`,
+    step: `Step ${step} of ${steps}`,
+    fraction: progress.total > 0 ? progress.done / progress.total : null,
+  });
+  return progress.stage === "media" ? counted("Copying media…", 2) : counted("Writing messages…", steps);
 }

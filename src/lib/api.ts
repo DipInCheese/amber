@@ -108,8 +108,16 @@ export function exportConversation(
 }
 
 export interface ExportProgress {
+  /** `reading` the archive, `media` being copied, or messages `writing`. */
+  stage: "reading" | "media" | "writing";
   done: number;
+  /** 0 when the stage has no countable length. */
   total: number;
+}
+
+/** A plain-language line about what the export is doing right now. */
+export function onExportLog(handler: (line: string) => void): Promise<UnlistenFn> {
+  return listen<string>("export://log", (event) => handler(event.payload));
 }
 
 export function onExportProgress(handler: (progress: ExportProgress) => void): Promise<UnlistenFn> {

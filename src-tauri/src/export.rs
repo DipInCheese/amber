@@ -4,6 +4,7 @@
 //! while holding the viewer's archive lock, so the conversation stays
 //! scrollable (and its photos keep loading) during a long export.
 
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -11,8 +12,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use amber_format::{
-    copy_attachment_from, system_clock, write_csv, write_html, write_json, write_text,
-    AmberArchive, ExportConversation, ExportFormat, MediaLinks,
+    copy_attachment_from, system_clock, write_csv_with_progress, write_html_with_progress,
+    write_json_with_progress, write_text_with_progress, AmberArchive, ExportConversation,
+    ExportFormat, MediaLinks,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -81,10 +83,62 @@ pub struct ExportSummary {
     pub media_failed: usize,
 }
 
+/// Sent as `export://progress`. `stage` is `"reading"`, `"media"` or
+/// `"writing"`; `total` is 0 when the stage has no countable length.
 #[derive(Debug, Clone, Serialize)]
 struct ExportProgressDto {
+    stage: &'static str,
     done: usize,
     total: usize,
+}
+
+/// Tells the window how far along an export is: a throttled progress event
+/// plus occasional plain-language log lines (`export://log`).
+struct Reporter {
+    send_progress: Box<dyn Fn(ExportProgressDto)>,
+    send_log: Box<dyn Fn(String)>,
+    last_emit: Instant,
+    next_milestone: usize,
+}
+
+impl Reporter {
+    fn new(
+        send_progress: impl Fn(ExportProgressDto) + 'static,
+        send_log: impl Fn(String) + 'static,
+    ) -> Self {
+        Self {
+            send_progress: Box::new(send_progress),
+            send_log: Box::new(send_log),
+            last_emit: Instant::now() - Duration::from_secs(1),
+            next_milestone: 1,
+        }
+    }
+
+    fn log(&self, line: impl Into<String>) {
+        (self.send_log)(line.into());
+    }
+
+    fn stage(&mut self, stage: &'static str, total: usize) {
+        self.next_milestone = 1;
+        self.last_emit = Instant::now() - Duration::from_secs(1);
+        (self.send_progress)(ExportProgressDto {
+            stage,
+            done: 0,
+            total,
+        });
+    }
+
+    /// Progress `done` of `total`; logs "<what> x of y" about every 10%.
+    fn step(&mut self, stage: &'static str, done: usize, total: usize, what: &str) {
+        if self.last_emit.elapsed() >= Duration::from_millis(100) || done == total {
+            (self.send_progress)(ExportProgressDto { stage, done, total });
+            self.last_emit = Instant::now();
+        }
+        if total >= 20 && done * 10 >= self.next_milestone * total && done < total {
+            self.next_milestone = done * 10 / total + 1;
+            self.log(format!("{what} {done} of {total}"));
+        }
+    }
 }
 
 /// Export the open conversation to `output_path` in `format`. For HTML,
@@ -98,41 +152,75 @@ pub fn export_conversation(
     include_media: bool,
     output_path: String,
 ) -> Result<ExportSummary, String> {
+    let started = Instant::now();
+    let (progress_app, log_app) = (app.clone(), app);
+    let mut report = Reporter::new(
+        move |progress| {
+            let _ = progress_app.emit("export://progress", progress);
+        },
+        move |line| {
+            let _ = log_app.emit("export://log", line);
+        },
+    );
+    report.stage("reading", 0);
+    report.log("Reading the conversation…");
+
     let zip_path = open_archive_path(&state)?;
     let archive = AmberArchive::open(&zip_path).map_err(|err| err.to_string())?;
     let conversation = ExportConversation::from_archive(&archive).map_err(|err| err.to_string())?;
+    let message_total = conversation.messages.len();
+    report.log(format!(
+        "Found {message_total} messages and {} attachments",
+        conversation
+            .messages
+            .iter()
+            .map(|m| m.attachments.len())
+            .sum::<usize>()
+    ));
 
     let output = Path::new(&output_path);
     let mut media_files = 0;
     let mut media_failed = 0;
 
     let mut writer = BufWriter::new(File::create(output).map_err(|err| err.to_string())?);
-    let written = match ExportFormat::from(format) {
-        ExportFormat::Text => write_text(&conversation, &system_clock, &mut writer),
-        ExportFormat::Csv => write_csv(&conversation, &system_clock, &mut writer),
-        ExportFormat::Json => write_json(&conversation, &mut writer),
-        ExportFormat::Html => {
-            let links = if include_media {
-                let copied = copy_media(&zip_path, &conversation, output, &mut |done, total| {
-                    let _ = app.emit("export://progress", ExportProgressDto { done, total });
-                })?;
-                media_files = copied.links.len();
-                media_failed = copied.failed;
-                copied.links
-            } else {
-                HashMap::new()
-            };
-            write_html(
-                &conversation,
-                &system_clock,
-                &|attachment| links.get(&attachment.rel_path).cloned(),
-                &mut writer,
-            )
+    let format = ExportFormat::from(format);
+    let mut links = HashMap::new();
+    if format == ExportFormat::Html && include_media {
+        let copied = {
+            let report = RefCell::new(&mut report);
+            copy_media(&zip_path, &conversation, output, &report)?
+        };
+        media_files = copied.links.len();
+        media_failed = copied.failed;
+        links = copied.links;
+    }
+
+    report.stage("writing", message_total);
+    report.log(format!("Writing {message_total} messages…"));
+    let mut on_message = |done: usize| report.step("writing", done, message_total, "Written");
+    let written = match format {
+        ExportFormat::Text => {
+            write_text_with_progress(&conversation, &system_clock, &mut writer, &mut on_message)
         }
+        ExportFormat::Csv => {
+            write_csv_with_progress(&conversation, &system_clock, &mut writer, &mut on_message)
+        }
+        ExportFormat::Json => write_json_with_progress(&conversation, &mut writer, &mut on_message),
+        ExportFormat::Html => write_html_with_progress(
+            &conversation,
+            &system_clock,
+            &|attachment| links.get(&attachment.rel_path).cloned(),
+            &mut writer,
+            &mut on_message,
+        ),
     };
     written
         .and_then(|()| writer.flush())
         .map_err(|err| err.to_string())?;
+    report.log(format!(
+        "Finished in {:.1} s",
+        started.elapsed().as_secs_f32()
+    ));
 
     Ok(ExportSummary {
         path: output_path,
@@ -154,7 +242,7 @@ fn copy_media(
     zip_path: &Path,
     conversation: &ExportConversation,
     output: &Path,
-    on_progress: &mut dyn FnMut(usize, usize),
+    report: &RefCell<&mut Reporter>,
 ) -> Result<CopiedMedia, String> {
     let stem = output
         .file_stem()
@@ -171,16 +259,17 @@ fn copy_media(
         .flat_map(|m| m.attachments.iter().map(|a| a.rel_path.as_str()))
         .collect();
     let total = distinct.len();
+    {
+        let mut report = report.borrow_mut();
+        report.stage("media", total);
+        report.log(format!("Copying {total} photos, videos and files…"));
+    }
 
     let mut links = HashMap::new();
     let mut failed = 0;
-    let mut last_emit = Instant::now() - Duration::from_secs(1);
 
     for (done, rel_path) in distinct.into_iter().enumerate() {
-        if last_emit.elapsed() >= Duration::from_millis(100) {
-            on_progress(done, total);
-            last_emit = Instant::now();
-        }
+        report.borrow_mut().step("media", done, total, "Copied");
 
         let file_name = rel_path.rsplit('/').next().unwrap_or(rel_path);
         let destination = folder.join(file_name);
@@ -195,6 +284,7 @@ fn copy_media(
         if copied.is_err() {
             let _ = std::fs::remove_file(&destination);
             failed += 1;
+            report.borrow().log(format!("Couldn’t copy {file_name}"));
             continue;
         }
 
@@ -213,7 +303,7 @@ fn copy_media(
         );
     }
 
-    on_progress(total, total);
+    report.borrow_mut().step("media", total, total, "Copied");
     Ok(CopiedMedia { links, failed })
 }
 
@@ -318,16 +408,25 @@ mod tests {
         let conversation = ExportConversation::from_archive(&archive).unwrap();
 
         let output = dir.path().join("My chat.html");
-        let mut progress = Vec::new();
-        let copied = copy_media(&zip_path, &conversation, &output, &mut |done, total| {
-            progress.push((done, total));
-        })
+        let progress = std::rc::Rc::new(RefCell::new(Vec::new()));
+        let seen = progress.clone();
+        let mut reporter = Reporter::new(
+            move |p| seen.borrow_mut().push((p.stage, p.done, p.total)),
+            |_| {},
+        );
+        let copied = copy_media(
+            &zip_path,
+            &conversation,
+            &output,
+            &RefCell::new(&mut reporter),
+        )
         .unwrap();
+        let progress = progress.borrow();
 
         assert_eq!(copied.failed, 0);
         assert_eq!(copied.links.len(), 2);
         // Ends on "all done", and every link is a relative, URL-safe path.
-        assert_eq!(progress.last(), Some(&(2, 2)));
+        assert_eq!(progress.last(), Some(&("media", 2, 2)));
         for links in copied.links.values() {
             assert!(
                 links.original.starts_with("My%20chat_files/"),
@@ -355,7 +454,13 @@ mod tests {
             "attachments/zz/missing.jpeg".to_string();
 
         let output = dir.path().join("chat.html");
-        let copied = copy_media(&zip_path, &conversation, &output, &mut |_, _| {}).unwrap();
+        let copied = copy_media(
+            &zip_path,
+            &conversation,
+            &output,
+            &RefCell::new(&mut Reporter::new(|_| {}, |_| {})),
+        )
+        .unwrap();
 
         assert_eq!(copied.failed, 1);
         assert!(copied.links.is_empty());

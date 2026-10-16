@@ -172,6 +172,10 @@
   margin-top: 2px;
 }
 
+.busy-text {
+  min-width: 0;
+}
+
 .busy-title {
   font-size: var(--fs-body);
   line-height: var(--lh-body);
