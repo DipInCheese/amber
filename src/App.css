@@ -595,3 +595,7 @@ body {
   font-size: 13px;
   cursor: pointer;
 }
+
+.import-progress progress {
+  width: 100%;
+}

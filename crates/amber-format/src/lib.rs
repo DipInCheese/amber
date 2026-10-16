@@ -26,4 +26,4 @@ pub use model::{
     ReactionRecord, SourceInput,
 };
 pub use reader::AmberArchive;
-pub use writer::write_archive;
+pub use writer::{write_archive, write_archive_with_progress, WriteProgress};

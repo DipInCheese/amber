@@ -5,8 +5,8 @@
 use std::io::Write as _;
 
 use amber_format::{
-    write_archive, AmberArchive, ArchiveInput, AttachmentInput, ConversationInput, MessageInput,
-    ParticipantInput, ReactionInput, SourceInput,
+    write_archive, write_archive_with_progress, AmberArchive, ArchiveInput, AttachmentInput,
+    ConversationInput, MessageInput, ParticipantInput, ReactionInput, SourceInput, WriteProgress,
 };
 
 fn sample_input(attachment_source: std::path::PathBuf) -> ArchiveInput {
@@ -184,6 +184,30 @@ fn identical_attachment_bytes_are_stored_once() {
     assert_eq!(attachments[0].sha256, attachments[1].sha256);
     let bytes = archive.read_attachment(&attachments[0].rel_path).unwrap();
     assert_eq!(bytes, attachment_bytes);
+}
+
+#[test]
+fn writing_reports_progress_through_every_stage_in_order() {
+    let work_dir = tempfile::tempdir().unwrap();
+    let attachment_path = write_synthetic_attachment(&work_dir, b"some media");
+    let input = sample_input(attachment_path);
+
+    let mut events = Vec::new();
+    write_archive_with_progress(
+        &work_dir.path().join("conversation.amber"),
+        &input,
+        |progress| events.push(progress),
+    )
+    .unwrap();
+
+    assert_eq!(
+        events,
+        vec![
+            WriteProgress::HashingAttachments { done: 0, total: 1 },
+            WriteProgress::BuildingDatabase,
+            WriteProgress::WritingAttachments { done: 0, total: 1 },
+        ]
+    );
 }
 
 #[test]

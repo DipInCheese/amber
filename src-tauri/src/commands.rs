@@ -26,7 +26,7 @@ impl AppState {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_archive(path: String, state: State<AppState>) -> Result<OpenArchiveResult, String> {
     open_and_store(Path::new(&path), &state)
 }
@@ -68,7 +68,7 @@ pub(crate) fn open_and_store(path: &Path, state: &AppState) -> Result<OpenArchiv
 /// are single-conversation, so even a 7-year, tens-of-thousands-of-messages
 /// history is a modest amount of JSON; the virtualized list (M4) is what
 /// keeps *rendering* that cheap, not paginated fetching.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn query_messages(state: State<AppState>) -> Result<Vec<MessageDto>, String> {
     let guard = state.archive.lock().unwrap();
     let archive = guard.as_ref().ok_or("no archive is open")?;
@@ -158,7 +158,7 @@ pub fn query_messages(state: State<AppState>) -> Result<Vec<MessageDto>, String>
 }
 
 /// The `day_index` scrubber cache for the currently open archive.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_day_index(state: State<AppState>) -> Result<Vec<DayBucketDto>, String> {
     let guard = state.archive.lock().unwrap();
     let archive = guard.as_ref().ok_or("no archive is open")?;

@@ -64,6 +64,17 @@ export function ingestConversation(
   return invoke("ingest_conversation", { chatIdentifier, outputPath });
 }
 
+export interface WriteProgress {
+  stage: "hashing" | "database" | "writing";
+  done: number;
+  total: number;
+}
+
+/** Progress while `ingest_conversation` is writing the `.amber` archive. */
+export function onWriteProgress(handler: (progress: WriteProgress) => void): Promise<UnlistenFn> {
+  return listen<WriteProgress>("ingest://write-progress", (event) => handler(event.payload));
+}
+
 /** 0-100 progress while `begin_ingest` is creating/refreshing a device backup. */
 export function onBackupProgress(handler: (percent: number) => void): Promise<UnlistenFn> {
   return listen<number>("ingest://backup-progress", (event) => handler(event.payload));

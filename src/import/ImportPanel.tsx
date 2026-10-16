@@ -10,6 +10,8 @@ import {
   ingestConversation,
   listIngestDevices,
   onBackupProgress,
+  onWriteProgress,
+  type WriteProgress,
 } from "../lib/api";
 import type {
   ConversationSummaryDto,
@@ -19,6 +21,7 @@ import type {
   SourceRequest,
 } from "../lib/types";
 import { filterConversations, formatBytes, formatLastActive } from "./conversationFilter";
+import { describeWriteProgress } from "./writeProgress";
 
 type SourceKind = "device" | "backup" | "live_mac";
 
@@ -27,7 +30,7 @@ type Phase =
   | { step: "configure"; kind: SourceKind }
   | { step: "resolving"; progress: number | null }
   | { step: "pick-conversation"; conversations: ConversationSummaryDto[] }
-  | { step: "writing" }
+  | { step: "writing"; progress: WriteProgress | null }
   | { step: "error"; message: string };
 
 function PrerequisiteRow({
@@ -57,6 +60,19 @@ function PrerequisiteRow({
   );
 }
 
+function WritingProgress({ progress }: { progress: WriteProgress | null }) {
+  const { label, fraction } = describeWriteProgress(progress);
+  return (
+    <div className="import-progress">
+      <p>{label}</p>
+      <progress value={fraction ?? undefined} max={1} />
+      <p className="import-note">
+        Large conversations take a while. You can leave this window open; Amber stays usable.
+      </p>
+    </div>
+  );
+}
+
 export function ImportPanel({
   onClose,
   onImported,
@@ -71,6 +87,16 @@ export function ImportPanel({
   const [backupPath, setBackupPath] = useState<string | null>(null);
   const [cache, setCache] = useState<DeviceBackupCacheDto | null>(null);
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    onWriteProgress((progress) => {
+      setPhase((current) => (current.step === "writing" ? { step: "writing", progress } : current));
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -164,7 +190,7 @@ export function ImportPanel({
     });
     if (!outputPath) return;
 
-    setPhase({ step: "writing" });
+    setPhase({ step: "writing", progress: null });
     try {
       const result = await ingestConversation(chatIdentifier, outputPath);
       onImported(result);
@@ -342,7 +368,7 @@ export function ImportPanel({
           </div>
         )}
 
-        {phase.step === "writing" && <p>Writing .amber archive…</p>}
+        {phase.step === "writing" && <WritingProgress progress={phase.progress} />}
 
         {phase.step === "error" && (
           <div className="import-error">

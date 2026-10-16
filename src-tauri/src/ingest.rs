@@ -9,8 +9,8 @@ use std::sync::Mutex;
 
 use amber_core::{list_conversations, parse_conversation, DomainMessage};
 use amber_format::{
-    write_archive, ArchiveInput, AttachmentInput, ConversationInput, MessageInput,
-    ParticipantInput, SourceInput,
+    write_archive_with_progress, ArchiveInput, AttachmentInput, ConversationInput, MessageInput,
+    ParticipantInput, SourceInput, WriteProgress,
 };
 use amber_ingest::{
     check_prerequisites, list_devices, resolve_backup, resolve_device, resolve_live_mac,
@@ -37,14 +37,14 @@ pub struct IngestState {
     pending: Mutex<Option<PendingIngest>>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn check_ingest_prerequisites(app: AppHandle) -> PrerequisiteReportDto {
     let runner = SidecarCommandRunner::new(app);
     let report: PrerequisiteReport = check_prerequisites(&runner, &tools());
     report.into()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_ingest_devices(app: AppHandle) -> Result<Vec<String>, String> {
     let runner = SidecarCommandRunner::new(app);
     list_devices(&runner, &tools()).map_err(|err| err.to_string())
@@ -85,7 +85,7 @@ pub struct DeviceBackupCacheDto {
 
 /// The most recently refreshed complete phone backup Amber is holding, if
 /// any. Interrupted/partial backups (no `Manifest.plist` yet) don't count.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn device_backup_cache_info(app: AppHandle) -> Result<Option<DeviceBackupCacheDto>, String> {
     let root = device_backup_cache_root(&app)?;
     let Ok(entries) = std::fs::read_dir(&root) else {
@@ -109,7 +109,7 @@ pub fn device_backup_cache_info(app: AppHandle) -> Result<Option<DeviceBackupCac
 
 /// Delete every cached phone backup (and drop any in-progress import that
 /// might still be reading from one).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_device_backup_cache(app: AppHandle, state: State<IngestState>) -> Result<(), String> {
     *state.pending.lock().unwrap() = None;
 
@@ -142,7 +142,7 @@ pub enum SourceRequest {
 /// Resolve `source` to a chat database and return the conversations found
 /// in it, so the frontend can let the user pick one. Stashes the resolved
 /// source in [`IngestState`] for the follow-up `ingest_conversation` call.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn begin_ingest(
     app: AppHandle,
     source: SourceRequest,
@@ -197,7 +197,7 @@ pub fn begin_ingest(
 /// written through this path currently carry text/timestamp/sender/
 /// attachments only. Enriching the M1 parser to close that gap is tracked
 /// separately rather than folded into this milestone.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ingest_conversation(
     app: AppHandle,
     chat_identifier: String,
@@ -272,7 +272,21 @@ pub fn ingest_conversation(
     };
 
     let output_path = Path::new(&output_path);
-    write_archive(output_path, &input).map_err(|err| err.to_string())?;
+    let mut throttle = ProgressThrottle::new();
+    write_archive_with_progress(output_path, &input, |progress| {
+        let (stage, done, total) = match progress {
+            WriteProgress::HashingAttachments { done, total } => ("hashing", done, total),
+            WriteProgress::BuildingDatabase => ("database", 0, 0),
+            WriteProgress::WritingAttachments { done, total } => ("writing", done, total),
+        };
+        if throttle.should_emit(stage) {
+            let _ = app.emit(
+                "ingest://write-progress",
+                WriteProgressDto { stage, done, total },
+            );
+        }
+    })
+    .map_err(|err| err.to_string())?;
     drop(guard);
 
     let _ = app.emit("ingest://done", output_path.to_string_lossy().into_owned());
@@ -280,6 +294,42 @@ pub fn ingest_conversation(
     result.attachments_imported = Some(attachments_imported);
     result.attachments_missing = Some(missing);
     Ok(result)
+}
+
+/// Sent as `ingest://write-progress` while the archive is being written.
+#[derive(Debug, Clone, Serialize)]
+struct WriteProgressDto {
+    /// `"hashing"`, `"database"` or `"writing"`.
+    stage: &'static str,
+    done: usize,
+    total: usize,
+}
+
+/// Lets a stage's first event and then at most ~10 per second through: a
+/// conversation with tens of thousands of small attachments would otherwise
+/// flood the webview with events nobody can read.
+struct ProgressThrottle {
+    last_stage: &'static str,
+    last_emit: std::time::Instant,
+}
+
+impl ProgressThrottle {
+    fn new() -> Self {
+        Self {
+            last_stage: "",
+            last_emit: std::time::Instant::now(),
+        }
+    }
+
+    fn should_emit(&mut self, stage: &'static str) -> bool {
+        let stage_changed = stage != self.last_stage;
+        if stage_changed || self.last_emit.elapsed() >= std::time::Duration::from_millis(100) {
+            self.last_stage = stage;
+            self.last_emit = std::time::Instant::now();
+            return true;
+        }
+        false
+    }
 }
 
 fn is_plugin_payload(attachment_path: &str) -> bool {

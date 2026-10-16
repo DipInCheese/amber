@@ -20,13 +20,35 @@ use crate::manifest::{
 use crate::model::{ArchiveInput, AttachmentInput};
 use crate::schema::{APPLICATION_ID, SCHEMA_SQL, SCHEMA_VERSION};
 
+/// Where [`write_archive_with_progress`] is up to. A conversation with tens
+/// of GB of media takes minutes, so callers need something to show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteProgress {
+    /// Reading and hashing each attachment (`done` of `total` attachments).
+    HashingAttachments { done: usize, total: usize },
+    /// Building the message database (a few seconds; no sub-steps).
+    BuildingDatabase,
+    /// Copying each unique attachment into the archive.
+    WritingAttachments { done: usize, total: usize },
+}
+
 /// Write `input` as a `.amber` archive at `output_path`, overwriting any
 /// existing file.
 pub fn write_archive(output_path: &Path, input: &ArchiveInput) -> Result<(), AmberFormatError> {
+    write_archive_with_progress(output_path, input, |_| {})
+}
+
+/// [`write_archive`], reporting progress as it goes.
+pub fn write_archive_with_progress(
+    output_path: &Path,
+    input: &ArchiveInput,
+    mut on_progress: impl FnMut(WriteProgress),
+) -> Result<(), AmberFormatError> {
     // Hash every attachment once, streaming - media can be tens of GB, so
     // nothing here may hold an attachment's bytes in memory.
-    let addressed = address_attachments(input)?;
+    let addressed = address_attachments(input, &mut on_progress)?;
 
+    on_progress(WriteProgress::BuildingDatabase);
     let db_bytes = build_messages_db(input, &addressed)?;
     let db_sha256 = sha256_hex(&db_bytes);
 
@@ -53,7 +75,12 @@ pub fn write_archive(output_path: &Path, input: &ArchiveInput) -> Result<(), Amb
     zip.start_file("messages.db", compressible)?;
     zip.write_all(&db_bytes)?;
 
-    for (rel_path, (source_path, byte_size)) in &unique_attachments {
+    let total_unique = unique_attachments.len();
+    for (index, (rel_path, (source_path, byte_size))) in unique_attachments.iter().enumerate() {
+        on_progress(WriteProgress::WritingAttachments {
+            done: index,
+            total: total_unique,
+        });
         // A single entry past 4 GiB needs the ZIP64 extension.
         let options = if *byte_size > u64::from(u32::MAX) {
             stored.large_file(true)
@@ -79,26 +106,32 @@ struct AddressedAttachment {
 
 /// Content-address every attachment (SHA-256, streamed), parallel to
 /// `input.attachments`.
-fn address_attachments(input: &ArchiveInput) -> Result<Vec<AddressedAttachment>, AmberFormatError> {
-    input
-        .attachments
-        .iter()
-        .map(|attachment| {
-            let (sha256, byte_size) = sha256_file(&attachment.source_path).map_err(|_| {
-                AmberFormatError::AttachmentSourceMissing(attachment.source_path.clone())
-            })?;
-            let rel_path = format!(
-                "attachments/{}/{sha256}.{}",
-                &sha256[0..2],
-                attachment_extension(attachment)
-            );
-            Ok(AddressedAttachment {
-                rel_path,
-                sha256,
-                byte_size,
-            })
-        })
-        .collect()
+fn address_attachments(
+    input: &ArchiveInput,
+    on_progress: &mut impl FnMut(WriteProgress),
+) -> Result<Vec<AddressedAttachment>, AmberFormatError> {
+    let total = input.attachments.len();
+    let mut addressed = Vec::with_capacity(total);
+
+    for (done, attachment) in input.attachments.iter().enumerate() {
+        on_progress(WriteProgress::HashingAttachments { done, total });
+
+        let (sha256, byte_size) = sha256_file(&attachment.source_path).map_err(|_| {
+            AmberFormatError::AttachmentSourceMissing(attachment.source_path.clone())
+        })?;
+        let rel_path = format!(
+            "attachments/{}/{sha256}.{}",
+            &sha256[0..2],
+            attachment_extension(attachment)
+        );
+        addressed.push(AddressedAttachment {
+            rel_path,
+            sha256,
+            byte_size,
+        });
+    }
+
+    Ok(addressed)
 }
 
 /// The extension an attachment is stored under (`SPEC.md`:
@@ -174,16 +207,24 @@ fn build_messages_db(
 
     {
         let db = Connection::open(&temp_path)?;
+        // This is a scratch file that's read back whole and zipped as soon
+        // as it's built, so crash-safety is worthless here - but a disk
+        // sync per commit is not: without a transaction every INSERT was
+        // its own commit, i.e. ~111,000 syncs for one big conversation
+        // (many minutes). No journal, no syncing, one transaction.
+        db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF;")?;
         db.pragma_update(None, "application_id", APPLICATION_ID)?;
         db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         db.execute_batch(SCHEMA_SQL)?;
 
+        db.execute_batch("BEGIN")?;
         let participant_ids = insert_participants(&db, input)?;
         let message_ids = insert_messages(&db, input, &participant_ids)?;
         insert_attachments(&db, input, &message_ids, addressed)?;
         insert_reactions(&db, input, &participant_ids)?;
         rebuild_fts(&db)?;
         build_day_index(&db)?;
+        db.execute_batch("COMMIT")?;
     }
 
     let bytes = std::fs::read(&temp_path)?;
