@@ -15,6 +15,7 @@
 
 /// Longest edge, in pixels, of the rendition sent to the webview. A phone
 /// photo is 12+ MP; a chat bubble never needs that.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const MAX_EDGE: u32 = 2048;
 
 pub fn is_heic(rel_path: &str) -> bool {
