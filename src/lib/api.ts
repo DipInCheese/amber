@@ -45,12 +45,12 @@ export function listIngestDevices(): Promise<string[]> {
 }
 
 /** The newest complete phone backup Amber is holding between imports, if any. */
-export function deviceBackupCacheInfo(): Promise<DeviceBackupCacheDto | null> {
-  return invoke("device_backup_cache_info");
+export function deviceBackupCacheInfo(backupDir: string | null = null): Promise<DeviceBackupCacheDto | null> {
+  return invoke("device_backup_cache_info", { backupDir });
 }
 
-export function clearDeviceBackupCache(): Promise<void> {
-  return invoke("clear_device_backup_cache");
+export function clearDeviceBackupCache(backupDir: string | null = null): Promise<void> {
+  return invoke("clear_device_backup_cache", { backupDir });
 }
 
 export function beginIngest(source: SourceRequest): Promise<ConversationSummaryDto[]> {
@@ -73,6 +73,11 @@ export interface WriteProgress {
 /** Progress while `ingest_conversation` is writing the `.amber` archive. */
 export function onWriteProgress(handler: (progress: WriteProgress) => void): Promise<UnlistenFn> {
   return listen<WriteProgress>("ingest://write-progress", (event) => handler(event.payload));
+}
+
+/** One line of `idevicebackup2` output (stdout/stderr) while a device backup runs. */
+export function onBackupLog(handler: (line: string) => void): Promise<UnlistenFn> {
+  return listen<string>("ingest://backup-log", (event) => handler(event.payload));
 }
 
 /** 0-100 progress while `begin_ingest` is creating/refreshing a device backup. */

@@ -55,7 +55,14 @@ pub fn list_ingest_devices(app: AppHandle) -> Result<Vec<String>, String> {
 /// what lets later imports of other conversations skip the phone entirely
 /// and a refresh transfer only what changed. It's Amber's own copy - the
 /// phone itself is never written to.
-fn device_backup_cache_root(app: &AppHandle) -> Result<PathBuf, String> {
+fn device_backup_cache_root(app: &AppHandle, custom: Option<&str>) -> Result<PathBuf, String> {
+    // A folder the user picked (the saved backup is as large as the phone's
+    // used storage, and the default drive is often a small system drive).
+    // Always a subfolder of it, so "Delete saved backup" can never remove
+    // anything else they keep there.
+    if let Some(dir) = custom.filter(|dir| !dir.trim().is_empty()) {
+        return Ok(Path::new(dir).join("Amber phone backup"));
+    }
     app.path()
         .app_local_data_dir()
         .map(|dir| dir.join("device-backups"))
@@ -86,8 +93,11 @@ pub struct DeviceBackupCacheDto {
 /// The most recently refreshed complete phone backup Amber is holding, if
 /// any. Interrupted/partial backups (no `Manifest.plist` yet) don't count.
 #[tauri::command(async)]
-pub fn device_backup_cache_info(app: AppHandle) -> Result<Option<DeviceBackupCacheDto>, String> {
-    let root = device_backup_cache_root(&app)?;
+pub fn device_backup_cache_info(
+    app: AppHandle,
+    backup_dir: Option<String>,
+) -> Result<Option<DeviceBackupCacheDto>, String> {
+    let root = device_backup_cache_root(&app, backup_dir.as_deref())?;
     let Ok(entries) = std::fs::read_dir(&root) else {
         return Ok(None);
     };
@@ -110,10 +120,14 @@ pub fn device_backup_cache_info(app: AppHandle) -> Result<Option<DeviceBackupCac
 /// Delete every cached phone backup (and drop any in-progress import that
 /// might still be reading from one).
 #[tauri::command(async)]
-pub fn clear_device_backup_cache(app: AppHandle, state: State<IngestState>) -> Result<(), String> {
+pub fn clear_device_backup_cache(
+    app: AppHandle,
+    state: State<IngestState>,
+    backup_dir: Option<String>,
+) -> Result<(), String> {
     *state.pending.lock().unwrap() = None;
 
-    let root = device_backup_cache_root(&app)?;
+    let root = device_backup_cache_root(&app, backup_dir.as_deref())?;
     match std::fs::remove_dir_all(&root) {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -131,6 +145,9 @@ pub enum SourceRequest {
     Device {
         udid: Option<String>,
         password: Option<String>,
+        /// Folder to keep the saved phone backup in (can be tens of GB).
+        /// Defaults to Amber's own app-data folder.
+        backup_dir: Option<String>,
     },
     Backup {
         path: String,
@@ -148,6 +165,9 @@ pub fn begin_ingest(
     source: SourceRequest,
     state: State<IngestState>,
 ) -> Result<Vec<ConversationSummaryDto>, String> {
+    // Scratch space for the extracted Messages database - small, so the
+    // system temp folder is fine. (The big thing, the saved phone backup,
+    // lives in its own folder; see device_backup_cache_root.)
     let work_dir = tempfile::tempdir().map_err(|err| err.to_string())?;
 
     let resolved = match source {
@@ -158,10 +178,15 @@ pub fn begin_ingest(
             resolve_backup(Path::new(&path), password, work_dir.path())
                 .map_err(|err| err.to_string())?
         }
-        SourceRequest::Device { udid, password } => {
+        SourceRequest::Device {
+            udid,
+            password,
+            backup_dir,
+        } => {
             let runner = SidecarCommandRunner::new(app.clone());
-            let backups_root = device_backup_cache_root(&app)?;
+            let backups_root = device_backup_cache_root(&app, backup_dir.as_deref())?;
             let progress_app = app.clone();
+            let log_app = app.clone();
             resolve_device(
                 &runner,
                 &tools(),
@@ -171,6 +196,9 @@ pub fn begin_ingest(
                 work_dir.path(),
                 move |percent| {
                     let _ = progress_app.emit("ingest://backup-progress", percent);
+                },
+                move |line| {
+                    let _ = log_app.emit("ingest://backup-log", line);
                 },
             )
             .map_err(|err| err.to_string())?

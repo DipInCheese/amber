@@ -526,6 +526,21 @@ body {
   font-size: 13px;
 }
 
+.import-log {
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--text) 6%, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .import-progress,
 .import-error {
   display: flex;

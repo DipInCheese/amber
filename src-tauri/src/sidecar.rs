@@ -31,6 +31,17 @@ impl CommandRunner for SidecarCommandRunner {
         envs: &[(&str, &str)],
         on_stdout_line: &mut dyn FnMut(&str),
     ) -> std::io::Result<CommandOutput> {
+        self.run_streaming(program, args, envs, on_stdout_line, &mut |_| {})
+    }
+
+    fn run_streaming(
+        &self,
+        program: &Path,
+        args: &[&str],
+        envs: &[(&str, &str)],
+        on_stdout_line: &mut dyn FnMut(&str),
+        on_stderr_line: &mut dyn FnMut(&str),
+    ) -> std::io::Result<CommandOutput> {
         // `sidecar()` wants just the bundled binary's base name (see
         // externalBin in tauri.conf.json), not a full path.
         let name = program
@@ -38,11 +49,17 @@ impl CommandRunner for SidecarCommandRunner {
             .and_then(|s| s.to_str())
             .unwrap_or_default();
 
-        match self.run_sidecar(name, args, envs, on_stdout_line) {
+        match self.run_sidecar(name, args, envs, on_stdout_line, on_stderr_line) {
             Some(result) => result,
             // No bundled sidecar (not wired up yet, or a `tauri dev` run) -
             // fall back to PATH, same as local development without Tauri.
-            None => SystemCommandRunner.run(Path::new(name), args, envs, on_stdout_line),
+            None => SystemCommandRunner.run_streaming(
+                Path::new(name),
+                args,
+                envs,
+                on_stdout_line,
+                on_stderr_line,
+            ),
         }
     }
 }
@@ -58,6 +75,7 @@ impl SidecarCommandRunner {
         args: &[&str],
         envs: &[(&str, &str)],
         on_stdout_line: &mut dyn FnMut(&str),
+        on_stderr_line: &mut dyn FnMut(&str),
     ) -> Option<std::io::Result<CommandOutput>> {
         let mut command = self.app.shell().sidecar(name).ok()?;
         command = command.args(args);
@@ -74,10 +92,15 @@ impl SidecarCommandRunner {
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(bytes) => {
-                        on_stdout_line(&String::from_utf8_lossy(&bytes));
+                        on_stdout_line(String::from_utf8_lossy(&bytes).trim_end());
                     }
                     CommandEvent::Stderr(bytes) => {
                         stderr.extend_from_slice(&bytes);
+                        let line = String::from_utf8_lossy(&bytes);
+                        on_stderr_line(line.trim_end());
+                        if !line.ends_with('\n') {
+                            stderr.push(b'\n');
+                        }
                     }
                     CommandEvent::Terminated(payload) => {
                         success = payload.code == Some(0);

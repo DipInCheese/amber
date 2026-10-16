@@ -13,6 +13,7 @@
 //! end-to-end flow has only been exercised via the injected `CommandRunner`
 //! in tests below, not a live device.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use crate::command_runner::CommandRunner;
@@ -77,8 +78,9 @@ pub fn select_device(
 /// Create or refresh (incremental - `idevicebackup2` only transfers changed
 /// data on subsequent runs, so `backup_root` should be a directory that
 /// outlives one import) a full backup of `udid` into `backup_root`,
-/// reporting 0-100 progress via `on_progress` as it goes. iOS offers no way
-/// to back up less than the whole device, so this is all-or-nothing.
+/// reporting 0-100 progress via `on_progress` and the tool's other output
+/// lines (stdout and stderr) via `on_log` as it goes. iOS offers no way to
+/// back up less than the whole device, so this is all-or-nothing.
 ///
 /// If the device already has encrypted backups turned on, `password` must
 /// be `Some` - passed via the `BACKUP_PASSWORD` environment variable
@@ -95,6 +97,7 @@ pub fn create_or_refresh_backup(
     backup_root: &Path,
     password: Option<&str>,
     mut on_progress: impl FnMut(f32),
+    on_log: impl FnMut(&str),
 ) -> Result<PathBuf, IngestError> {
     std::fs::create_dir_all(backup_root)?;
 
@@ -108,19 +111,36 @@ pub fn create_or_refresh_backup(
         .map(|password| vec![("BACKUP_PASSWORD", password)])
         .unwrap_or_default();
 
+    // Both streams feed the live log (progress-bar lines excluded, they
+    // would just flood it); the two callbacks share `on_log`. Plain stdout
+    // lines are also kept: these tools often print the real error there
+    // instead of on stderr, and a blank failure message helps nobody.
+    let on_log = RefCell::new(on_log);
     let mut stdout_lines = Vec::new();
-    let output = runner.run(&tools.idevicebackup2, &args, &envs, &mut |line| {
-        stdout_lines.push(line.to_string());
-        if let Some(percent) = parse_progress_line(line) {
-            on_progress(percent);
-        }
-    })?;
+    let output = runner.run_streaming(
+        &tools.idevicebackup2,
+        &args,
+        &envs,
+        &mut |line| {
+            if let Some(percent) = parse_progress_line(line) {
+                on_progress(percent);
+            } else if !line.trim().is_empty() {
+                stdout_lines.push(line.to_string());
+                (on_log.borrow_mut())(line);
+            }
+        },
+        &mut |line| {
+            if !line.trim().is_empty() {
+                (on_log.borrow_mut())(line);
+            }
+        },
+    )?;
 
     if !output.success {
         return Err(IngestError::ToolFailed {
             tool: "idevicebackup2",
             status: "non-zero exit".to_string(),
-            stderr: fallback_detail(output.stderr, &stdout_lines),
+            stderr: with_backup_hint(fallback_detail(output.stderr, &stdout_lines)),
         });
     }
 
@@ -136,7 +156,36 @@ fn fallback_detail(stderr: String, stdout_lines: &[String]) -> String {
     if !stderr.trim().is_empty() {
         stderr
     } else {
-        stdout_lines.join("\n")
+        stdout_lines.join(
+            "
+",
+        )
+    }
+}
+
+/// `idevicebackup2` fails the `mobilebackup2` handshake with
+/// "Could not perform backup protocol version exchange" when the phone
+/// refuses the session after the service itself started - almost always
+/// because the phone is locked / waiting on a passcode or Trust prompt, or
+/// (less often) because the bundled libimobiledevice is too old for the
+/// phone's iOS version. The raw tool output doesn't say any of that.
+fn with_backup_hint(stderr: String) -> String {
+    if stderr.contains("protocol version exchange") {
+        format!(
+            "{stderr}
+
+The iPhone rejected the backup session. Unlock it, keep the screen on,              accept any \"Trust This Computer\" or passcode prompt, then try again. If it keeps              failing, the bundled libimobiledevice may be too old for this iOS version."
+        )
+    } else if stderr.contains("MBErrorDomain/105")
+        || stderr.contains("Insufficient free disk space")
+    {
+        format!(
+            "{stderr}
+
+The drive holding the backup is too small - a full backup              needs about as much free space as the phone has used. Free up space, or choose a              different backup location on a larger drive."
+        )
+    } else {
+        stderr
     }
 }
 
@@ -327,6 +376,7 @@ mod tests {
             backup_root.path(),
             None,
             |_| {},
+            |_| {},
         )
         .unwrap();
 
@@ -360,6 +410,7 @@ mod tests {
             "UDID123",
             backup_root.path(),
             Some("hunter2"),
+            |_| {},
             |_| {},
         )
         .unwrap();
@@ -396,10 +447,42 @@ mod tests {
             |p| {
                 seen.push(p);
             },
+            |_| {},
         )
         .unwrap();
 
         assert_eq!(seen, vec![40.0, 100.0]);
+    }
+
+    #[test]
+    fn create_or_refresh_backup_streams_log_lines_but_not_progress() {
+        let runner = FakeCommandRunner {
+            stdout_lines: vec![
+                "Backup [####]  40%".to_string(),
+                "Receiving files".to_string(),
+            ],
+            success: true,
+            stderr: "Started service\n\nStarting backup...\n".to_string(),
+            last_call: Mutex::new(None),
+        };
+        let backup_root = tempfile::tempdir().unwrap();
+
+        let mut log = Vec::new();
+        create_or_refresh_backup(
+            &runner,
+            &tools(),
+            "UDID123",
+            backup_root.path(),
+            None,
+            |_| {},
+            |line| log.push(line.to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            log,
+            vec!["Receiving files", "Started service", "Starting backup..."]
+        );
     }
 
     #[test]
@@ -418,6 +501,7 @@ mod tests {
             "UDID123",
             backup_root.path(),
             None,
+            |_| {},
             |_| {},
         );
         assert!(matches!(result, Err(IngestError::ToolFailed { .. })));
@@ -445,6 +529,7 @@ mod tests {
             backup_root.path(),
             None,
             |_| {},
+            |_| {},
         );
         match result {
             Err(IngestError::ToolFailed { stderr, .. }) => {
@@ -452,6 +537,55 @@ mod tests {
             }
             other => panic!("expected ToolFailed with stdout fallback, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn create_or_refresh_backup_hints_on_version_exchange_failure() {
+        let runner = FakeCommandRunner {
+            stdout_lines: vec![],
+            success: false,
+            stderr: "Could not perform backup protocol version exchange, error code -1".to_string(),
+            last_call: Mutex::new(None),
+        };
+        let backup_root = tempfile::tempdir().unwrap();
+
+        let err = create_or_refresh_backup(
+            &runner,
+            &tools(),
+            "UDID123",
+            backup_root.path(),
+            None,
+            |_| {},
+            |_| {},
+        )
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("version exchange"));
+        assert!(message.contains("Unlock"));
+    }
+
+    #[test]
+    fn create_or_refresh_backup_hints_on_insufficient_disk_space() {
+        let runner = FakeCommandRunner {
+            stdout_lines: vec![],
+            success: false,
+            stderr: "ErrorCode 105: Insufficient free disk space on drive to back up (MBErrorDomain/105)"
+                .to_string(),
+            last_call: Mutex::new(None),
+        };
+        let backup_root = tempfile::tempdir().unwrap();
+
+        let err = create_or_refresh_backup(
+            &runner,
+            &tools(),
+            "UDID123",
+            backup_root.path(),
+            None,
+            |_| {},
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("backup location"));
     }
 
     #[test]
