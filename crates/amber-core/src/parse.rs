@@ -88,6 +88,10 @@ pub fn parse_conversation(
             ts_unix_ms: apple_ts_to_unix_ms(message.date),
             sender,
             is_from_me: message.is_from_me(),
+            service: message
+                .service
+                .clone()
+                .filter(|service| !service.is_empty()),
             attachment_paths,
         });
     }

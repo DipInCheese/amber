@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+mod chrome;
 mod commands;
 mod dto;
 mod export;
 mod heic;
 mod ingest;
+mod media_size;
 mod mime;
 mod protocol;
 mod rendition_cache;
 mod sidecar;
 mod tools;
 
+use chrome::ChromeState;
 use commands::AppState;
 use ingest::IngestState;
 
@@ -21,8 +24,14 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(AppState::default())
         .manage(IngestState::default())
+        .manage(ChromeState::default())
+        .setup(|app| {
+            chrome::setup(app)?;
+            Ok(())
+        })
         .register_asynchronous_uri_scheme_protocol(protocol::SCHEME, protocol::handle_request)
         .invoke_handler(tauri::generate_handler![
+            chrome::chrome_info,
             commands::open_archive,
             commands::query_messages,
             commands::get_day_index,

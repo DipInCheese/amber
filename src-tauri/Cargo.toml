@@ -30,6 +30,7 @@ amber-format.workspace = true
 amber-ingest.workspace = true
 tempfile.workspace = true
 tauri-plugin-shell = "2"
+imagesize = "0.15.0"
 
 # HEIC -> JPEG for display (src/heic.rs): WebView2 can't decode HEIC, but the
 # Windows Imaging Component can once the HEIF extension is installed. Same

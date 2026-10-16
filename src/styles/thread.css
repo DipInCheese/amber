@@ -1,0 +1,510 @@
+/* The conversation: rows, bubbles, media, find. */
+
+.conversation-view {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.thread-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-2) var(--sp-4) var(--sp-4);
+  /* The timeline is the scrollbar: hide the native one (wheel, touch and
+     keyboard scrolling all still work) instead of showing two. */
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+  outline: none;
+}
+
+.thread-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Space between rows comes from here, not from the bubbles: tight inside a
+   run of messages from one person, looser between runs. */
+.thread-row-single,
+.thread-row-first {
+  padding-top: 10px;
+}
+
+.thread-row-middle,
+.thread-row-last {
+  padding-top: 2px;
+}
+
+.thread-row-date {
+  padding-top: var(--sp-6);
+  padding-bottom: var(--sp-1);
+}
+
+.date-separator {
+  text-align: center;
+  font-size: var(--fs-footnote);
+  line-height: var(--lh-footnote);
+  color: var(--label-2);
+}
+
+.date-separator strong {
+  font-weight: 600;
+}
+
+.time-stamp {
+  padding: var(--sp-2) 0 var(--sp-1);
+  text-align: center;
+  align-self: stretch;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: 600;
+  color: var(--label-3);
+}
+
+/* --- Rows and bubbles --------------------------------------------------- */
+
+.message-row {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+}
+
+.message-row.from-me {
+  align-items: flex-end;
+}
+
+.message-row.from-them {
+  align-items: flex-start;
+}
+
+.sender-label {
+  margin: 0 0 2px calc(28px + 12px + 12px);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  color: var(--label-2);
+}
+
+.bubble-line {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  width: 100%;
+}
+
+.message-row.from-me .bubble-line {
+  flex-direction: row-reverse;
+}
+
+.avatar-slot {
+  flex: 0 0 28px;
+  width: 28px;
+  margin-right: var(--sp-1);
+}
+
+.bubble-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: min(72%, 520px);
+}
+
+.message-row.from-me .bubble-stack {
+  align-items: flex-end;
+}
+
+.message-row.from-them .bubble-stack {
+  align-items: flex-start;
+}
+
+.hover-time {
+  align-self: center;
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+  color: var(--label-3);
+  opacity: 0;
+  transition: opacity var(--t-fast) ease;
+  pointer-events: none;
+}
+
+.bubble-stack:hover + .hover-time {
+  opacity: 1;
+  transition-delay: 200ms;
+}
+
+.bubble {
+  --tail: var(--bubble-them);
+  position: relative;
+  max-width: 100%;
+  padding: 7px 12px;
+  border-radius: var(--r-xl);
+  background: var(--bubble-them);
+  color: var(--bubble-them-text);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.message-row.from-me .bubble {
+  --tail: var(--bubble-me);
+  background: var(--bubble-me);
+  color: var(--bubble-me-text);
+}
+
+.message-row.from-me.is-sms .bubble {
+  --tail: var(--sms);
+  background: var(--sms);
+}
+
+/* The tail: only on the last bubble of a run. */
+.message-row.pos-single .bubble:not(.bubble-unsent)::after,
+.message-row.pos-last .bubble:not(.bubble-unsent)::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 10px;
+  height: 16px;
+  background: var(--tail);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 16' preserveAspectRatio='none'%3E%3Cpath d='M0 0H2C2 9 4 14 10 16H0Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 16' preserveAspectRatio='none'%3E%3Cpath d='M0 0H2C2 9 4 14 10 16H0Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+
+.message-row.from-me.pos-single .bubble:not(.bubble-unsent),
+.message-row.from-me.pos-last .bubble:not(.bubble-unsent) {
+  border-bottom-right-radius: 4px;
+}
+
+.message-row.from-me.pos-single .bubble::after,
+.message-row.from-me.pos-last .bubble::after {
+  right: -8px;
+}
+
+.message-row.from-them.pos-single .bubble:not(.bubble-unsent),
+.message-row.from-them.pos-last .bubble:not(.bubble-unsent) {
+  border-bottom-left-radius: 4px;
+}
+
+.message-row.from-them.pos-single .bubble::after,
+.message-row.from-them.pos-last .bubble::after {
+  left: -8px;
+  transform: scaleX(-1);
+}
+
+.bubble-unsent {
+  background: transparent !important;
+  box-shadow: inset 0 0 0 1px var(--sep);
+  color: var(--label-3) !important;
+  font-style: italic;
+}
+
+.bubble-text {
+  white-space: pre-wrap;
+}
+
+.bubble > * + * {
+  margin-top: 6px;
+}
+
+.bubble-stack > .media-tile,
+.bubble-stack > .media-grid {
+  margin-bottom: 2px;
+}
+
+.bubble-edited {
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  opacity: 0.7;
+}
+
+.reply-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 100%;
+  margin-bottom: var(--sp-1);
+  padding: var(--sp-1) var(--sp-3);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--accent-tint);
+  font-size: var(--fs-footnote);
+  line-height: var(--lh-footnote);
+}
+
+.reply-quote-sender {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.reply-quote-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--label-2);
+}
+
+.reactions {
+  display: flex;
+  gap: var(--sp-1);
+  margin-top: 2px;
+}
+
+.reaction-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-pill);
+  background: var(--bubble-them);
+  color: var(--label-2);
+}
+
+.tapback-text {
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* --- Media in bubbles --------------------------------------------------- */
+
+.media-tile {
+  position: relative;
+  max-width: 100%;
+  border-radius: var(--r-lg);
+  background: var(--fill);
+  overflow: hidden;
+}
+
+/* A fine edge so a dark photo doesn't dissolve into the dark theme. */
+.media-tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  pointer-events: none;
+}
+
+.media-open {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.media-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--t-sheet) ease;
+}
+
+.media-tile.is-loaded .media-img {
+  opacity: 1;
+}
+
+.media-placeholder {
+  position: absolute;
+  inset: 0;
+}
+
+.media-tools {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity var(--t-fast) ease,
+    transform var(--t-fast) ease;
+  pointer-events: none;
+}
+
+.media-tile:hover .media-tools,
+.media-tile:focus-within .media-tools {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.media-tool {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background var(--t-fast) ease;
+}
+
+.media-tool:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.media-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  height: 100%;
+  padding: var(--sp-3);
+  text-align: center;
+  color: var(--label-2);
+}
+
+.media-fallback-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-subhead);
+  color: var(--label);
+}
+
+.media-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  width: 300px;
+  max-width: 100%;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.media-grid-2 {
+  aspect-ratio: 2 / 1;
+}
+
+.media-grid-3,
+.media-grid-4 {
+  aspect-ratio: 1 / 1;
+  grid-template-rows: 1fr 1fr;
+}
+
+.media-grid-3 .media-tile:first-child {
+  grid-row: span 2;
+}
+
+.media-cell {
+  min-height: 0;
+  border-radius: 0;
+}
+
+.media-cell .media-img {
+  cursor: zoom-in;
+}
+
+.media-more {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.attachment-audio {
+  width: 240px;
+  max-width: 100%;
+}
+
+.attachment-file {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-subhead);
+  line-height: var(--lh-subhead);
+}
+
+.attachment-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.attachment-note {
+  opacity: 0.7;
+}
+
+.attachment-file-save {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 var(--sp-3);
+  border: 1px solid currentColor;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: inherit;
+  font-size: var(--fs-footnote);
+  opacity: 0.85;
+  cursor: pointer;
+  transition: opacity var(--t-fast) ease;
+}
+
+.attachment-file-save:hover {
+  opacity: 1;
+}
+
+/* --- Find --------------------------------------------------------------- */
+
+.find-bar {
+  position: absolute;
+  top: var(--sp-3);
+  right: calc(56px + var(--sp-3));
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border-radius: var(--r-lg);
+  background: var(--bg-sheet);
+  box-shadow: var(--shadow-pop);
+  animation: drop var(--t-fast) var(--ease);
+}
+
+.find-field {
+  width: 240px;
+}
+
+.find-status {
+  min-width: 64px;
+  padding: 0 var(--sp-1);
+  text-align: right;
+  font-size: var(--fs-footnote);
+  color: var(--label-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.find-mark {
+  border-radius: 3px;
+  background: rgba(255, 214, 10, 0.5);
+  color: inherit;
+}
+
+.find-mark.is-active {
+  background: #ffd60a;
+  color: #000;
+}

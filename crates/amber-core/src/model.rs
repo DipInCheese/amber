@@ -22,6 +22,10 @@ pub struct DomainMessage {
     pub sender: String,
     /// `true` when the database owner sent this message.
     pub is_from_me: bool,
+    /// "iMessage", "SMS", ... - how the message travelled. Shown as the
+    /// bubble colour (blue for iMessage, green for SMS/MMS).
+    #[serde(default)]
+    pub service: Option<String>,
     /// Relative/original file paths of any attachments on this message, in
     /// database join order. Resolving these to actual bytes on disk is an
     /// ingest-time (M5) concern, not a parsing one.
@@ -40,6 +44,7 @@ mod tests {
             ts_unix_ms: 1_700_000_000_000,
             sender: "me".to_string(),
             is_from_me: true,
+            service: Some("iMessage".to_string()),
             attachment_paths: vec!["attachments/ab/abcdef.heic".to_string()],
         };
 

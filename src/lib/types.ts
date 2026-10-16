@@ -29,6 +29,8 @@ export interface MessageDto {
   ts_unix_ms: number;
   sender_identifier: string | null;
   is_from_me: boolean;
+  /** "iMessage", "SMS", ...; `null` when the archive doesn't say. */
+  service: string | null;
   text: string | null;
   reply_to_guid: string | null;
   is_edited: boolean;

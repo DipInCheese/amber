@@ -10,19 +10,20 @@ import { easeToward, prefersReducedMotion } from "./smoothScroll";
 export interface ThreadViewHandle {
   /** Scrolls so the first row at or after `tsUnixMs` is at the top. Used by the timeline scrubber. */
   scrollToDate: (tsUnixMs: number) => void;
+  /** Glides so the message with this row key sits in the middle of the view. Used by find. */
+  scrollToMessageKey: (key: string) => void;
 }
 
 export const ThreadView = forwardRef<
   ThreadViewHandle,
   {
     messages: MessageDto[];
-    isGroup: boolean;
     /** Called with the timestamp of the topmost visible row whenever it changes, so the scrubber can track scroll position. */
     onVisibleDateChange?: (tsUnixMs: number) => void;
     /** True while the thread is still gliding toward a timeline target - media stays light until it lands. */
     onScrollAnimatingChange?: (animating: boolean) => void;
   }
->(function ThreadView({ messages, isGroup, onVisibleDateChange, onScrollAnimatingChange }, ref) {
+>(function ThreadView({ messages, onVisibleDateChange, onScrollAnimatingChange }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rows = useMemo(() => buildThreadRows(messages), [messages]);
 
@@ -31,7 +32,7 @@ export const ThreadView = forwardRef<
     getScrollElement: () => scrollRef.current,
     // Rough guess; measureElement (below) corrects it per-row for bubbles
     // that wrap text or carry attachments.
-    estimateSize: (index) => (rows[index].kind === "date" ? 36 : 64),
+    estimateSize: (index) => (rows[index].kind === "date" ? 40 : 44),
     overscan: 12,
     getItemKey: (index) => rows[index].key,
   });
@@ -45,6 +46,7 @@ export const ThreadView = forwardRef<
   // estimates until rows have been measured and the offset shifts as it
   // gets closer.
   const targetIndexRef = useRef<number | null>(null);
+  const targetAlignRef = useRef<"start" | "center">("start");
   const frameRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef(0);
   const settledFramesRef = useRef(0);
@@ -65,7 +67,7 @@ export const ThreadView = forwardRef<
     (now: number) => {
       const element = scrollRef.current;
       const index = targetIndexRef.current;
-      const target = index === null ? undefined : virtualizer.getOffsetForIndex(index, "start")?.[0];
+      const target = index === null ? undefined : virtualizer.getOffsetForIndex(index, targetAlignRef.current)?.[0];
       if (!element || target === undefined) {
         stopChase();
         return;
@@ -91,13 +93,14 @@ export const ThreadView = forwardRef<
   );
 
   const glideToIndex = useCallback(
-    (index: number) => {
+    (index: number, align: "start" | "center" = "start") => {
       if (prefersReducedMotion()) {
-        virtualizer.scrollToIndex(index, { align: "start" });
+        virtualizer.scrollToIndex(index, { align });
         return;
       }
       const wasIdle = frameRef.current === null;
       targetIndexRef.current = index;
+      targetAlignRef.current = align;
       settledFramesRef.current = 0;
       if (wasIdle) {
         lastFrameTimeRef.current = performance.now();
@@ -129,6 +132,10 @@ export const ThreadView = forwardRef<
       scrollToDate: (tsUnixMs: number) => {
         glideToIndex(findRowIndexForTimestamp(rows, tsUnixMs));
       },
+      scrollToMessageKey: (key: string) => {
+        const index = rows.findIndex((row) => row.key === key);
+        if (index !== -1) glideToIndex(index, "center");
+      },
     }),
     [rows, glideToIndex],
   );
@@ -158,7 +165,7 @@ export const ThreadView = forwardRef<
               key={row.key}
               ref={virtualizer.measureElement}
               data-index={virtualRow.index}
-              className="thread-row"
+              className={`thread-row ${row.kind === "date" ? "thread-row-date" : `thread-row-${row.position}`}`}
               style={{
                 position: "absolute",
                 top: 0,
@@ -172,8 +179,10 @@ export const ThreadView = forwardRef<
               ) : (
                 <MessageBubble
                   message={row.message}
+                  messageKey={row.key}
                   replyTo={row.replyTo}
-                  showSender={isGroup}
+                  position={row.position}
+                  timeAbove={row.timeAbove}
                 />
               )}
             </div>

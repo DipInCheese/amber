@@ -65,3 +65,33 @@ export function safeFileName(name: string, fallback = "conversation"): string {
   const trimmed = cleaned.replace(/[. ]+$/, "").slice(0, 120);
   return trimmed || fallback;
 }
+
+/** The biggest a single photo or video appears in a bubble. */
+export const MEDIA_MAX_WIDTH = 300;
+export const MEDIA_MAX_HEIGHT = 360;
+const MIN_ASPECT = 0.5;
+const MAX_ASPECT = 2.2;
+
+export interface FrameSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * The frame a photo or video is shown in, from its pixel size: as large as
+ * fits {@link MEDIA_MAX_WIDTH} x {@link MEDIA_MAX_HEIGHT} without changing
+ * its shape. Very wide or very tall pictures are cropped to a sensible shape
+ * instead of becoming slivers. `null` when the size isn't known (older
+ * archives), so the caller can fall back to a default frame.
+ */
+export function mediaFrameSize(width: number | null, height: number | null): FrameSize | null {
+  if (!width || !height || width <= 0 || height <= 0) return null;
+  const aspect = Math.min(MAX_ASPECT, Math.max(MIN_ASPECT, width / height));
+  let frameWidth = MEDIA_MAX_WIDTH;
+  let frameHeight = frameWidth / aspect;
+  if (frameHeight > MEDIA_MAX_HEIGHT) {
+    frameHeight = MEDIA_MAX_HEIGHT;
+    frameWidth = frameHeight * aspect;
+  }
+  return { width: Math.round(frameWidth), height: Math.round(frameHeight) };
+}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { attachmentFilename, collectViewableMedia, mediaKind, safeFileName } from "./media";
+import { attachmentFilename, collectViewableMedia, mediaFrameSize, mediaKind, safeFileName } from "./media";
 import type { AttachmentDto, MessageDto } from "./types";
 
 function attachment(rel_path: string, mime_type: string | null, filename: string | null = null): AttachmentDto {
@@ -13,6 +13,7 @@ function message(guid: string, ts: number, attachments: AttachmentDto[]): Messag
     ts_unix_ms: ts,
     sender_identifier: "+15551234567",
     is_from_me: false,
+    service: "iMessage",
     text: null,
     reply_to_guid: null,
     is_edited: false,
@@ -79,5 +80,26 @@ describe("safeFileName", () => {
     expect(safeFileName("   ")).toBe("conversation");
     expect(safeFileName("???")).toBe("___");
     expect(safeFileName("name.. ")).toBe("name");
+  });
+});
+
+describe("mediaFrameSize", () => {
+  it("keeps the picture's shape inside the maximum box", () => {
+    expect(mediaFrameSize(4000, 3000)).toEqual({ width: 300, height: 225 });
+    expect(mediaFrameSize(3000, 4000)).toEqual({ width: 270, height: 360 });
+    expect(mediaFrameSize(1000, 1000)).toEqual({ width: 300, height: 300 });
+  });
+
+  it("crops extreme shapes to a sensible frame", () => {
+    const panorama = mediaFrameSize(10000, 1000);
+    expect(panorama).not.toBeNull();
+    expect(panorama!.width / panorama!.height).toBeLessThanOrEqual(2.25);
+    const tall = mediaFrameSize(500, 5000)!;
+    expect(tall.width / tall.height).toBeGreaterThanOrEqual(0.49);
+  });
+
+  it("returns null when the size isn't known", () => {
+    expect(mediaFrameSize(null, null)).toBeNull();
+    expect(mediaFrameSize(0, 100)).toBeNull();
   });
 });

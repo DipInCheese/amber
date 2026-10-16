@@ -145,6 +145,7 @@ pub fn query_messages(state: State<AppState>) -> Result<Vec<MessageDto>, String>
                 guid: message.guid,
                 ts_unix_ms: message.ts_unix_ms,
                 is_from_me: message.is_from_me,
+                service: message.service,
                 text: message.text,
                 reply_to_guid: message.reply_to_guid,
                 is_edited: message.is_edited,

@@ -7,7 +7,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use amber_core::{list_conversations, parse_conversation, DomainMessage};
+use amber_core::{
+    list_conversations, parse_conversation, Contacts, ConversationSummary, DomainMessage,
+};
 use amber_format::{
     write_archive_with_progress, ArchiveInput, AttachmentInput, ConversationInput, MessageInput,
     ParticipantInput, SourceInput, WriteProgress,
@@ -29,6 +31,10 @@ use crate::tools::tools;
 /// work directory) between `begin_ingest` and `ingest_conversation`.
 struct PendingIngest {
     resolved: ResolvedSource,
+    /// Names from the source's address book (empty when it has none).
+    contacts: Contacts,
+    /// What the picker showed, so the archive can carry the same names.
+    conversations: Vec<ConversationSummary>,
     _work_dir: tempfile::TempDir,
 }
 
@@ -205,15 +211,34 @@ pub fn begin_ingest(
         }
     };
 
-    let conversations =
-        list_conversations(&resolved.chat_db_path).map_err(|err| err.to_string())?;
+    let contacts = resolved
+        .contacts_db_path
+        .as_deref()
+        .and_then(|path| Contacts::load(path).ok())
+        .unwrap_or_else(Contacts::empty);
 
+    // Name each conversation after the person (or people) in it rather than
+    // their phone number, wherever the address book knows them.
+    let mut conversations =
+        list_conversations(&resolved.chat_db_path).map_err(|err| err.to_string())?;
+    for conversation in &mut conversations {
+        conversation.display_name = contacts.conversation_label(
+            &conversation.chat_identifier,
+            conversation.display_name.as_deref(),
+            conversation.is_group,
+            &conversation.participants,
+        );
+    }
+
+    let listed = conversations.iter().cloned().map(Into::into).collect();
     *state.pending.lock().unwrap() = Some(PendingIngest {
         resolved,
+        contacts,
+        conversations,
         _work_dir: work_dir,
     });
 
-    Ok(conversations.into_iter().map(Into::into).collect())
+    Ok(listed)
 }
 
 /// Parse the conversation `chat_identifier` out of the source resolved by
@@ -241,6 +266,11 @@ pub fn ingest_conversation(
     let messages = parse_conversation(&pending.resolved.chat_db_path, &chat_identifier)
         .map_err(|err| err.to_string())?;
 
+    let summary = pending
+        .conversations
+        .iter()
+        .find(|conversation| conversation.chat_identifier == chat_identifier);
+
     let mut participants = vec![ParticipantInput {
         identifier: "me".to_string(),
         display_name: Some("Me".to_string()),
@@ -251,7 +281,10 @@ pub fn ingest_conversation(
         if seen_senders.insert(message.sender.clone()) {
             participants.push(ParticipantInput {
                 identifier: message.sender.clone(),
-                display_name: None,
+                display_name: pending
+                    .contacts
+                    .name_for(&message.sender)
+                    .map(str::to_string),
                 is_me: false,
             });
         }
@@ -272,8 +305,8 @@ pub fn ingest_conversation(
         },
         conversation: ConversationInput {
             chat_identifier: chat_identifier.clone(),
-            display_name: None,
-            is_group: false,
+            display_name: summary.and_then(|conversation| conversation.display_name.clone()),
+            is_group: summary.is_some_and(|conversation| conversation.is_group),
         },
         participants,
         messages: messages
@@ -287,7 +320,7 @@ pub fn ingest_conversation(
                 },
                 is_from_me: message.is_from_me,
                 ts_unix_ms: message.ts_unix_ms,
-                service: None,
+                service: message.service.clone(),
                 text: message.text.clone(),
                 reply_to_guid: None,
                 is_edited: false,
@@ -406,13 +439,17 @@ fn collect_attachments(
                 .filter(|mime| *mime != "application/octet-stream")
                 .map(str::to_string);
 
+            // How big it looks on screen, so the viewer can reserve the right
+            // frame before the picture loads.
+            let size = crate::media_size::display_size(&source_path, mime_type.as_deref());
+
             attachments.push(AttachmentInput {
                 message_guid: message.guid.clone(),
                 source_path,
                 mime_type,
                 filename,
-                width: None,
-                height: None,
+                width: size.map(|(width, _)| width),
+                height: size.map(|(_, height)| height),
                 duration_ms: None,
             });
         }
@@ -453,6 +490,7 @@ mod tests {
             ts_unix_ms: 0,
             sender: "me".to_string(),
             is_from_me: true,
+            service: None,
             attachment_paths: paths.iter().map(ToString::to_string).collect(),
         }
     }

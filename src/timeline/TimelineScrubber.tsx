@@ -60,6 +60,20 @@ export function TimelineScrubber({
     scrubbingChangeRef.current = onScrubbingChange;
   });
 
+  // Quiet at rest: the strip only shows its detail while you hover it, drag
+  // it, or the thread is scrolling past (it falls asleep again after a moment).
+  const [awake, setAwake] = useState(false);
+  const hoverRef = useRef(false);
+  const sleepTimer = useRef<number | undefined>(undefined);
+  const wake = useCallback(() => {
+    setAwake(true);
+    window.clearTimeout(sleepTimer.current);
+    sleepTimer.current = window.setTimeout(() => {
+      if (!hoverRef.current && !draggingRef.current) setAwake(false);
+    }, 1400);
+  }, []);
+  useEffect(() => () => window.clearTimeout(sleepTimer.current), []);
+
   const [trackHeight, setTrackHeight] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [label, setLabel] = useState("");
@@ -89,6 +103,10 @@ export function TimelineScrubber({
 
   const currentFraction =
     range && currentTsUnixMs !== null ? timestampToFraction(currentTsUnixMs, range) : null;
+
+  useEffect(() => {
+    if (currentFraction !== null) wake();
+  }, [currentFraction, wake]);
 
   // Follow the thread while the user isn't dragging (wheel scroll, and the
   // glide home after a drag ends). While dragging the pointer owns the handle.
@@ -132,6 +150,7 @@ export function TimelineScrubber({
     // pointer position now so the tap still goes where it was aimed.
     if (pendingYRef.current !== null) flushRef.current();
     draggingRef.current = false;
+    wake();
     if (frameRef.current !== null) {
       cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
@@ -139,7 +158,7 @@ export function TimelineScrubber({
     pendingYRef.current = null;
     setDragging(false);
     scrubbingChangeRef.current?.(false);
-  }, []);
+  }, [wake]);
 
   // Never leave the thread stuck in "scrubbing" mode if this unmounts mid-drag.
   useEffect(() => () => endDrag(), [endDrag]);
@@ -177,7 +196,17 @@ export function TimelineScrubber({
   };
 
   return (
-    <div className={`timeline-scrubber${dragging ? " is-dragging" : ""}`}>
+    <div
+      className={`timeline-scrubber${dragging ? " is-dragging" : ""}${awake ? " is-awake" : ""}`}
+      onPointerEnter={() => {
+        hoverRef.current = true;
+        wake();
+      }}
+      onPointerLeave={() => {
+        hoverRef.current = false;
+        wake();
+      }}
+    >
       <div
         className="timeline-track"
         ref={trackRef}

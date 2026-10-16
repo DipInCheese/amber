@@ -37,6 +37,7 @@ pub struct MessageDto {
     pub ts_unix_ms: i64,
     pub sender_identifier: Option<String>,
     pub is_from_me: bool,
+    pub service: Option<String>,
     pub text: Option<String>,
     pub reply_to_guid: Option<String>,
     pub is_edited: bool,

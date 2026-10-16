@@ -36,6 +36,9 @@ pub struct ResolvedSource {
     /// Human-readable device name, when known (from backup/device
     /// metadata; `None` for a live Mac).
     pub device_name: Option<String>,
+    /// A copy of the address book in Amber's working directory, when the
+    /// source has one - used to show contact names instead of numbers.
+    pub contacts_db_path: Option<PathBuf>,
     attachments: Box<dyn AttachmentLocator>,
 }
 
@@ -49,8 +52,16 @@ impl ResolvedSource {
         Self {
             chat_db_path,
             device_name,
+            contacts_db_path: None,
             attachments,
         }
+    }
+
+    /// Attach the address book copied out of the source.
+    #[must_use]
+    pub fn with_contacts_db(mut self, path: PathBuf) -> Self {
+        self.contacts_db_path = Some(path);
+        self
     }
 
     /// Resolve one attachment's bytes, given the path

@@ -19,6 +19,9 @@ use crate::source::{AttachmentLocator, ResolvedSource};
 const MESSAGES_DOMAIN: &str = "HomeDomain";
 const MESSAGES_RELATIVE_PATH: &str = "Library/SMS/sms.db";
 
+/// Where the phone keeps the names people saved for numbers and emails.
+const ADDRESS_BOOK_RELATIVE_PATH: &str = "Library/AddressBook/AddressBook.sqlitedb";
+
 /// Open the backup at `path`, extract (decrypting if needed) its Messages
 /// database into `work_dir`, and return a [`ResolvedSource`] for it.
 pub fn resolve(
@@ -46,6 +49,19 @@ pub fn resolve(
 
     let device_name = Some(backup.lockdown().device_name.clone());
 
+    // Names are a nicety: a backup without (or with an unreadable) address
+    // book still imports, just showing numbers.
+    let contacts_db_path = entries
+        .iter()
+        .find(|entry| {
+            entry.domain == MESSAGES_DOMAIN && entry.relative_path == ADDRESS_BOOK_RELATIVE_PATH
+        })
+        .and_then(|entry| read_entry(&backup, entry).ok())
+        .and_then(|bytes| {
+            let path = work_dir.join("AddressBook.sqlitedb");
+            std::fs::write(&path, bytes).ok().map(|()| path)
+        });
+
     // Index MediaDomain entries (attachments) by their relative path once,
     // rather than re-scanning `entries` per attachment lookup.
     let attachments_by_relative_path: HashMap<String, BackupFileEntry> = entries
@@ -54,14 +70,18 @@ pub fn resolve(
         .map(|entry| (entry.relative_path.clone(), entry))
         .collect();
 
-    Ok(ResolvedSource::new(
+    let resolved = ResolvedSource::new(
         chat_db_path,
         device_name,
         Box::new(BackupAttachmentLocator {
             backup,
             attachments_by_relative_path,
         }),
-    ))
+    );
+    Ok(match contacts_db_path {
+        Some(path) => resolved.with_contacts_db(path),
+        None => resolved,
+    })
 }
 
 /// Read one file's plaintext bytes out of a backup, decrypting only if the
@@ -236,6 +256,41 @@ mod tests {
             std::fs::create_dir_all(&subdir).unwrap();
             std::fs::write(subdir.join(id), bytes).unwrap();
         }
+    }
+
+    #[test]
+    fn copies_the_address_book_out_of_a_backup_when_it_has_one() {
+        let backup_dir = tempfile::tempdir().unwrap();
+        let work_dir = tempfile::tempdir().unwrap();
+        build_synthetic_backup(backup_dir.path(), b"fake sqlite bytes", b"fake heic bytes");
+
+        let without = resolve(backup_dir.path(), None, work_dir.path()).unwrap();
+        assert!(without.contacts_db_path.is_none());
+
+        let book_id = "cccccccccccccccccccccccccccccccccccccccc";
+        let db = Connection::open(backup_dir.path().join("Manifest.db")).unwrap();
+        db.execute(
+            "INSERT INTO Files (fileID, domain, relativePath, flags, file) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                book_id,
+                "HomeDomain",
+                "Library/AddressBook/AddressBook.sqlitedb",
+                1,
+                mbfile_plist_bytes(9)
+            ],
+        )
+        .unwrap();
+        drop(db);
+        let subdir = backup_dir.path().join(&book_id[0..2]);
+        std::fs::create_dir_all(&subdir).unwrap();
+        std::fs::write(subdir.join(book_id), b"book data").unwrap();
+
+        let work_dir = tempfile::tempdir().unwrap();
+        let with = resolve(backup_dir.path(), None, work_dir.path()).unwrap();
+        let copied = with
+            .contacts_db_path
+            .expect("address book should be extracted");
+        assert_eq!(std::fs::read(copied).unwrap(), b"book data");
     }
 
     #[test]

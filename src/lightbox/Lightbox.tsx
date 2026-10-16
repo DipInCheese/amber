@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { attachmentUrl } from "../lib/api";
 import type { MediaItem } from "../lib/media";
+import { usePeople } from "../thread/PeopleContext";
+import { IconChevronLeft, IconChevronRight, IconClose, IconDownload } from "../ui/icons";
 
 /** Where the clicked thumbnail was on screen, so the photo can grow out of it. */
 export interface OriginRect {
@@ -16,9 +18,8 @@ const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 });
 
-function captionFor(item: MediaItem): string {
-  const who = item.isFromMe ? "You" : (item.sender ?? "Unknown");
-  return `${who} - ${dateTimeFormatter.format(new Date(item.tsUnixMs))}`;
+function captionFor(item: MediaItem, who: string): string {
+  return `${who} · ${dateTimeFormatter.format(new Date(item.tsUnixMs))}`;
 }
 
 /**
@@ -43,6 +44,7 @@ export function Lightbox({
   onSave: (item: MediaItem) => void;
 }) {
   const item = items[index];
+  const { nameFor } = usePeople();
   const dialogRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const growFromOrigin = useRef(origin);
@@ -141,17 +143,18 @@ export function Lightbox({
       <header className="lightbox-bar">
         <div className="lightbox-caption">
           <strong>{item.filename}</strong>
-          <span>{captionFor(item)}</span>
+          <span>{captionFor(item, item.isFromMe ? "You" : nameFor(item.sender))}</span>
         </div>
         <div className="lightbox-actions">
           <span className="lightbox-counter">
             {(index + 1).toLocaleString()} / {items.length.toLocaleString()}
           </span>
           <button type="button" className="lightbox-button" onClick={() => onSave(item)}>
+            <IconDownload size={16} />
             Download
           </button>
-          <button type="button" className="lightbox-button lightbox-close" aria-label="Close" onClick={close}>
-            ×
+          <button type="button" className="lightbox-button lightbox-icon" aria-label="Close" onClick={close}>
+            <IconClose size={18} />
           </button>
         </div>
       </header>
@@ -163,7 +166,7 @@ export function Lightbox({
           aria-label="Previous photo"
           onClick={() => goTo(index - 1)}
         >
-          ‹
+          <IconChevronLeft size={26} />
         </button>
       )}
       {hasNext && (
@@ -173,7 +176,7 @@ export function Lightbox({
           aria-label="Next photo"
           onClick={() => goTo(index + 1)}
         >
-          ›
+          <IconChevronRight size={26} />
         </button>
       )}
 
@@ -185,8 +188,9 @@ export function Lightbox({
       >
         {failed ? (
           <div className="lightbox-failed" key={item.key}>
-            <p>This can't be previewed here.</p>
+            <p>This can’t be previewed here.</p>
             <button type="button" className="lightbox-button" onClick={() => onSave(item)}>
+              <IconDownload size={16} />
               Download {item.filename}
             </button>
           </div>

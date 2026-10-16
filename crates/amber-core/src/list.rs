@@ -3,6 +3,7 @@
 //! can let the user pick one before parsing it in full (`parse_conversation`
 //! needs a specific `chat_identifier`).
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use imessage_database::tables::table::get_connection;
@@ -22,12 +23,37 @@ pub struct ConversationSummary {
     /// ms), so a picker can show and sort by recency. `None` for an empty
     /// conversation or one whose messages all carry Apple's "unset" date.
     pub last_message_ts_unix_ms: Option<i64>,
+    /// The other people in the conversation (phone numbers / email
+    /// addresses, as stored by Messages), so a caller can show names for
+    /// them - an unnamed group chat has no label of its own.
+    #[serde(default)]
+    pub participants: Vec<String>,
 }
 
 /// List every conversation in the database at `db_path`, most recently
 /// active first (ties broken by message count).
 pub fn list_conversations(db_path: &Path) -> Result<Vec<ConversationSummary>, AmberCoreError> {
     let db = get_connection(db_path)?;
+
+    let mut participants_by_chat: HashMap<i64, Vec<String>> = HashMap::new();
+    {
+        let mut handles = db.prepare(
+            "SELECT j.chat_id, h.id
+               FROM chat_handle_join j
+               JOIN handle h ON h.ROWID = j.handle_id
+              ORDER BY j.chat_id, h.ROWID",
+        )?;
+        let pairs = handles.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for pair in pairs {
+            let (chat_id, handle) = pair?;
+            participants_by_chat
+                .entry(chat_id)
+                .or_default()
+                .push(handle);
+        }
+    }
 
     let mut statement = db.prepare(
         "SELECT
@@ -38,7 +64,8 @@ pub fn list_conversations(db_path: &Path) -> Result<Vec<ConversationSummary>, Am
              (SELECT MAX(msg.date)
                 FROM chat_message_join j
                 JOIN message msg ON msg.ROWID = j.message_id
-               WHERE j.chat_id = c.ROWID) AS last_date
+               WHERE j.chat_id = c.ROWID) AS last_date,
+             c.ROWID
          FROM chat c
          ORDER BY COALESCE(last_date, 0) DESC, message_count DESC",
     )?;
@@ -46,7 +73,12 @@ pub fn list_conversations(db_path: &Path) -> Result<Vec<ConversationSummary>, Am
     let rows = statement.query_map([], |row| {
         let display_name: Option<String> = row.get(1)?;
         let last_date: Option<i64> = row.get(4)?;
+        let chat_id: i64 = row.get(5)?;
         Ok(ConversationSummary {
+            participants: participants_by_chat
+                .get(&chat_id)
+                .cloned()
+                .unwrap_or_default(),
             chat_identifier: row.get(0)?,
             display_name: display_name.filter(|name| !name.is_empty()),
             message_count: row.get(2)?,
@@ -78,6 +110,9 @@ mod tests {
             );
             CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
             CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
+            CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
+            INSERT INTO handle (ROWID, id) VALUES
+                (1, '+15551234567'), (2, '+15550000002'), (3, '+15550000003'), (4, 'x@example.com');
 
             -- A 1:1 conversation with 2 messages.
             INSERT INTO chat (ROWID, chat_identifier, display_name) VALUES (1, '+15551234567', NULL);
@@ -119,7 +154,13 @@ mod tests {
             Some(1_728_307_200_000)
         );
 
+        assert_eq!(
+            conversations[0].participants,
+            vec!["+15550000002", "+15550000003", "x@example.com"]
+        );
+
         assert_eq!(conversations[1].chat_identifier, "+15551234567");
+        assert_eq!(conversations[1].participants, vec!["+15551234567"]);
         assert_eq!(conversations[1].message_count, 2);
         assert!(!conversations[1].is_group);
         assert_eq!(

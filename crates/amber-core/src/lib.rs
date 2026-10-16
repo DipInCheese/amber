@@ -7,12 +7,14 @@
 //! or an iTunes backup) is `amber-ingest`'s job; turning parsed messages into
 //! a `.amber` archive is `amber-format`'s job.
 
+pub mod contacts;
 pub mod error;
 pub mod list;
 pub mod model;
 pub mod parse;
 pub mod time;
 
+pub use contacts::Contacts;
 pub use error::AmberCoreError;
 pub use list::{list_conversations, ConversationSummary};
 pub use model::DomainMessage;
