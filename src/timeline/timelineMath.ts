@@ -86,3 +86,18 @@ export function monthTicks(range: TimelineRange): MonthTick[] {
   }
   return ticks;
 }
+
+/**
+ * Pointer height -> 0..1 along a track, clamped so dragging past either end
+ * pins to the start/end instead of extrapolating.
+ */
+export function pointerFraction(clientY: number, trackTop: number, trackHeight: number): number {
+  if (trackHeight <= 0) return 0;
+  return Math.min(1, Math.max(0, (clientY - trackTop) / trackHeight));
+}
+
+/** `ts` moved by whole calendar months (UTC), landing on the 1st - used by the keyboard controls. */
+export function stepMonths(tsUnixMs: number, delta: number): number {
+  const date = new Date(tsUnixMs);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + delta, 1);
+}

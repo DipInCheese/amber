@@ -4,7 +4,9 @@ import {
   fractionToTimestamp,
   monthTicks,
   parseDayKey,
+  pointerFraction,
   rangeFromDayKeys,
+  stepMonths,
   timestampToFraction,
   yearTicks,
 } from "./timelineMath";
@@ -83,5 +85,32 @@ describe("monthTicks", () => {
     const range = rangeFromDayKeys(["2024-01-15", "2024-04-01"])!;
     const ticks = monthTicks(range);
     expect(ticks.map((t) => new Date(t.tsUnixMs).getUTCMonth())).toEqual([1, 2, 3]);
+  });
+});
+
+describe("pointerFraction", () => {
+  it("maps a position along the track to 0..1", () => {
+    expect(pointerFraction(150, 100, 200)).toBe(0.25);
+  });
+
+  it("clamps when the pointer is dragged past either end", () => {
+    expect(pointerFraction(40, 100, 200)).toBe(0);
+    expect(pointerFraction(900, 100, 200)).toBe(1);
+  });
+
+  it("is safe for a track with no height yet", () => {
+    expect(pointerFraction(10, 0, 0)).toBe(0);
+  });
+});
+
+describe("stepMonths", () => {
+  it("moves by whole months and lands on the 1st", () => {
+    expect(stepMonths(Date.UTC(2024, 2, 15), 1)).toBe(Date.UTC(2024, 3, 1));
+    expect(stepMonths(Date.UTC(2024, 2, 15), -1)).toBe(Date.UTC(2024, 1, 1));
+  });
+
+  it("rolls over year boundaries", () => {
+    expect(stepMonths(Date.UTC(2024, 11, 20), 1)).toBe(Date.UTC(2025, 0, 1));
+    expect(stepMonths(Date.UTC(2024, 0, 5), -1)).toBe(Date.UTC(2023, 11, 1));
   });
 });

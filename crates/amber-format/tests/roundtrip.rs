@@ -5,8 +5,9 @@
 use std::io::Write as _;
 
 use amber_format::{
-    write_archive, write_archive_with_progress, AmberArchive, ArchiveInput, AttachmentInput,
-    ConversationInput, MessageInput, ParticipantInput, ReactionInput, SourceInput, WriteProgress,
+    utc_clock, write_archive, write_archive_with_progress, write_text, AmberArchive, ArchiveInput,
+    AttachmentInput, ConversationInput, ExportConversation, MessageInput, ParticipantInput,
+    ReactionInput, SourceInput, WriteProgress,
 };
 
 fn sample_input(attachment_source: std::path::PathBuf) -> ArchiveInput {
@@ -184,6 +185,46 @@ fn identical_attachment_bytes_are_stored_once() {
     assert_eq!(attachments[0].sha256, attachments[1].sha256);
     let bytes = archive.read_attachment(&attachments[0].rel_path).unwrap();
     assert_eq!(bytes, attachment_bytes);
+}
+
+#[test]
+fn an_archive_exports_to_every_format_with_names_attachments_and_reactions() {
+    let work_dir = tempfile::tempdir().unwrap();
+    let attachment_path = write_synthetic_attachment(&work_dir, b"photo bytes");
+    let archive_path = work_dir.path().join("conversation.amber");
+    write_archive(&archive_path, &sample_input(attachment_path)).unwrap();
+
+    let archive = AmberArchive::open(&archive_path).unwrap();
+    let conversation = ExportConversation::from_archive(&archive).unwrap();
+
+    assert_eq!(conversation.title, "Test Chat");
+    assert_eq!(conversation.messages.len(), 2);
+    // Display names, not raw identifiers; "Me" for the owner.
+    assert_eq!(conversation.messages[0].sender, "Alice");
+    assert_eq!(conversation.messages[1].sender, "Me");
+    assert_eq!(
+        conversation.messages[0].attachments[0].filename,
+        "photo.jpg"
+    );
+    assert_eq!(conversation.messages[1].reactions[0].kind, "loved");
+    assert_eq!(
+        conversation.messages[1].reactions[0].from.as_deref(),
+        Some("Alice")
+    );
+
+    let mut text = Vec::new();
+    write_text(&conversation, &utc_clock, &mut text).unwrap();
+    let text = String::from_utf8(text).unwrap();
+    assert!(text.contains("Alice: hey!"));
+    assert!(text.contains("[attachment: photo.jpg]"));
+
+    let mut copied = Vec::new();
+    let attachment = &conversation.messages[0].attachments[0];
+    let bytes = archive
+        .copy_attachment_to(&attachment.rel_path, &mut copied)
+        .unwrap();
+    assert_eq!(bytes as usize, copied.len());
+    assert_eq!(copied, b"photo bytes");
 }
 
 #[test]

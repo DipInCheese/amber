@@ -8,6 +8,7 @@
 //! regardless of where that data came from.
 
 mod error;
+mod export;
 mod hash;
 mod manifest;
 mod model;
@@ -16,6 +17,11 @@ mod schema;
 mod writer;
 
 pub use error::AmberFormatError;
+pub use export::{
+    system_clock, utc_clock, write_csv, write_html, write_json, write_text, Clock,
+    ExportAttachment, ExportConversation, ExportFormat, ExportMessage, ExportReaction, LocalTime,
+    MediaLinks,
+};
 pub use manifest::{
     Manifest, ManifestConversation, ManifestCounts, ManifestExportedRange, ManifestIntegrity,
     ManifestParticipant, ManifestSource,
@@ -25,5 +31,5 @@ pub use model::{
     MessageInput, MessageRecord, ParticipantInput, ParticipantRecord, ReactionInput,
     ReactionRecord, SourceInput,
 };
-pub use reader::AmberArchive;
+pub use reader::{copy_attachment_from, AmberArchive};
 pub use writer::{write_archive, write_archive_with_progress, WriteProgress};

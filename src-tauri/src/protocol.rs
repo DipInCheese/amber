@@ -4,11 +4,22 @@
 //! `<img>`/`<video>` tags directly at attachment paths without Amber ever
 //! copying media out into the web layer.
 
+use std::sync::{Arc, Mutex, OnceLock};
+
 use tauri::{http, AppHandle, Manager, UriSchemeContext, UriSchemeResponder, Wry};
 
 use crate::commands::AppState;
 use crate::heic;
 use crate::mime::guess_from_extension;
+use crate::rendition_cache::RenditionCache;
+
+/// Converted HEIC renditions (~0.5-1 MB each), most recent ones kept.
+const RENDITION_CACHE_BYTES: usize = 192 * 1024 * 1024;
+
+fn renditions() -> &'static Mutex<RenditionCache> {
+    static CACHE: OnceLock<Mutex<RenditionCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(RenditionCache::new(RENDITION_CACHE_BYTES)))
+}
 
 pub const SCHEME: &str = "amber-attachment";
 
@@ -29,6 +40,14 @@ fn respond(app: &AppHandle, request: &http::Request<Vec<u8>>) -> http::Response<
     let rel_path = request.uri().path().trim_start_matches('/');
     let rel_path = percent_decode(rel_path);
 
+    // A photo converted a moment ago needs no archive read and no decoding.
+    if heic::is_heic(&rel_path) {
+        let cached = renditions().lock().unwrap().get(&rel_path);
+        if let Some(jpeg) = cached {
+            return ok_response(jpeg.to_vec(), "image/jpeg");
+        }
+    }
+
     // Hold the archive lock only for the read itself, not for any decoding.
     let read = {
         let state = app.state::<AppState>();
@@ -44,10 +63,26 @@ fn respond(app: &AppHandle, request: &http::Request<Vec<u8>>) -> http::Response<
     };
 
     let (bytes, content_type) = displayable(&rel_path, bytes);
+    if content_type == "image/jpeg" && heic::is_heic(&rel_path) {
+        renditions()
+            .lock()
+            .unwrap()
+            .insert(rel_path.clone(), Arc::new(bytes.clone()));
+    }
+    ok_response(bytes, content_type)
+}
+
+fn ok_response(bytes: Vec<u8>, content_type: &str) -> http::Response<Vec<u8>> {
     http::Response::builder()
         .status(http::StatusCode::OK)
         .header(http::header::CONTENT_TYPE, content_type)
         .header(http::header::CONTENT_LENGTH, bytes.len())
+        // Paths are content-addressed (they contain the file's SHA-256), so
+        // the bytes behind a URL never change.
+        .header(
+            http::header::CACHE_CONTROL,
+            "public, max-age=31536000, immutable",
+        )
         .body(bytes)
         .unwrap_or_else(|_| not_found("failed to build response"))
 }

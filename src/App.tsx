@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useState } from "react";
 import "./App.css";
 import { ConversationView } from "./ConversationView";
+import { ExportPanel } from "./export/ExportPanel";
 import { ImportPanel } from "./import/ImportPanel";
 import { importSummary } from "./import/importSummary";
 import { OnboardingBanner } from "./OnboardingBanner";
@@ -23,6 +24,7 @@ type LoadState =
 function App() {
   const [state, setState] = useState<LoadState>({ status: "empty" });
   const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [importNotice, setImportNotice] = useState<string | null>(null);
 
   const loadCurrentArchive = useCallback(async (conversation: OpenArchiveResult) => {
@@ -71,6 +73,11 @@ function App() {
           Import…
         </button>
         {state.status === "ready" && (
+          <button type="button" className="open-button" onClick={() => setExportOpen(true)}>
+            Export…
+          </button>
+        )}
+        {state.status === "ready" && (
           <div className="conversation-title">
             {state.conversation.display_name ?? state.conversation.chat_identifier}
             <span className="conversation-count">
@@ -107,6 +114,13 @@ function App() {
           />
         )}
       </main>
+
+      {exportOpen && state.status === "ready" && (
+        <ExportPanel
+          title={state.conversation.display_name ?? state.conversation.chat_identifier}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
 
       {importOpen && (
         <ImportPanel onClose={() => setImportOpen(false)} onImported={handleImported} />

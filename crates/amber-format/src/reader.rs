@@ -191,6 +191,36 @@ impl AmberArchive {
         entry.read_to_end(&mut bytes)?;
         Ok(bytes)
     }
+
+    /// Path of the `.amber` file this archive was opened from.
+    pub fn zip_path(&self) -> &Path {
+        &self.zip_path
+    }
+
+    /// Stream one attachment into `writer` without holding it in memory -
+    /// for saving or exporting multi-hundred-MB videos. Returns the number
+    /// of bytes written.
+    pub fn copy_attachment_to(
+        &self,
+        rel_path: &str,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<u64, AmberFormatError> {
+        copy_attachment_from(&self.zip_path, rel_path, writer)
+    }
+}
+
+/// [`AmberArchive::copy_attachment_to`] without needing the archive value,
+/// so a caller can drop whatever lock guards it before a long copy.
+pub fn copy_attachment_from(
+    zip_path: &Path,
+    rel_path: &str,
+    writer: &mut dyn std::io::Write,
+) -> Result<u64, AmberFormatError> {
+    let file = File::open(zip_path)?;
+    let mut zip =
+        ZipArchive::new(file).map_err(|err| AmberFormatError::NotAZip(err.to_string()))?;
+    let mut entry = zip.by_name(rel_path)?;
+    Ok(std::io::copy(&mut entry, writer)?)
 }
 
 fn read_manifest(zip: &mut ZipArchive<File>) -> Result<Manifest, AmberFormatError> {

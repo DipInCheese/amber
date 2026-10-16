@@ -147,6 +147,11 @@ Building in order; each milestone lands as its own set of commits.
       format the webview can't play, the viewer shows a plain file link
       instead). Media that exists only in iCloud isn't in a phone backup, so
       the import reports how many attachments were missing.
+      In the viewer, click a photo to open it full-screen (arrow keys step
+      through every photo and video; each has a Download button that saves
+      the original file), and use **Export…** to write the conversation as
+      HTML (optionally with its media in a folder beside it), plain text,
+      CSV or JSON. The `.amber` file itself is unchanged by any of this.
 
 ## Architecture
 

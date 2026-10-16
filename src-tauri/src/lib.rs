@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 mod commands;
 mod dto;
+mod export;
 mod heic;
 mod ingest;
 mod mime;
 mod protocol;
+mod rendition_cache;
 mod sidecar;
 mod tools;
 
@@ -24,6 +26,8 @@ pub fn run() {
             commands::open_archive,
             commands::query_messages,
             commands::get_day_index,
+            export::save_attachment,
+            export::export_conversation,
             ingest::check_ingest_prerequisites,
             ingest::list_ingest_devices,
             ingest::device_backup_cache_info,

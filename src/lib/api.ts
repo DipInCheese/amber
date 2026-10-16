@@ -79,3 +79,34 @@ export function onWriteProgress(handler: (progress: WriteProgress) => void): Pro
 export function onBackupProgress(handler: (percent: number) => void): Promise<UnlistenFn> {
   return listen<number>("ingest://backup-progress", (event) => handler(event.payload));
 }
+
+/** Write one attachment, exactly as stored, to a path the user picked. */
+export function saveAttachment(relPath: string, destPath: string): Promise<void> {
+  return invoke("save_attachment", { relPath, destPath });
+}
+
+export type ExportFormat = "text" | "csv" | "json" | "html";
+
+export interface ExportSummary {
+  path: string;
+  messages: number;
+  media_files: number;
+  media_failed: number;
+}
+
+export function exportConversation(
+  format: ExportFormat,
+  includeMedia: boolean,
+  outputPath: string,
+): Promise<ExportSummary> {
+  return invoke("export_conversation", { format, includeMedia, outputPath });
+}
+
+export interface ExportProgress {
+  done: number;
+  total: number;
+}
+
+export function onExportProgress(handler: (progress: ExportProgress) => void): Promise<UnlistenFn> {
+  return listen<ExportProgress>("export://progress", (event) => handler(event.payload));
+}
