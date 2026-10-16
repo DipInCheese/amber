@@ -119,6 +119,15 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 8px 16px;
+  /* The timeline is the scrollbar: hide the native one (wheel, touch and
+     keyboard scrolling all still work) instead of showing two. */
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+  outline: none;
+}
+
+.thread-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .thread-row {

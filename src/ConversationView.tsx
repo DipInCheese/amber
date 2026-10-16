@@ -24,6 +24,9 @@ export function ConversationView({
     messages[0]?.ts_unix_ms ?? null,
   );
   const [scrubbing, setScrubbing] = useState(false);
+  // The thread keeps gliding for a moment after the finger lifts; media stays
+  // light until it has actually landed.
+  const [gliding, setGliding] = useState(false);
   const [lightbox, setLightbox] = useState<{ index: number; origin: OriginRect | null } | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
@@ -67,8 +70,8 @@ export function ConversationView({
   );
 
   const mediaActions = useMemo<MediaActions>(
-    () => ({ open, save, scrubbing }),
-    [open, save, scrubbing],
+    () => ({ open, save, scrubbing: scrubbing || gliding }),
+    [open, save, scrubbing, gliding],
   );
 
   const handleScrub = useCallback((tsUnixMs: number) => {
@@ -88,6 +91,7 @@ export function ConversationView({
           messages={messages}
           isGroup={isGroup}
           onVisibleDateChange={setCurrentTsUnixMs}
+          onScrollAnimatingChange={setGliding}
         />
         <TimelineScrubber
           dayBuckets={dayBuckets}

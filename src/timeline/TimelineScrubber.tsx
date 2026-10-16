@@ -55,6 +55,7 @@ export function TimelineScrubber({
   // Held in a ref so the drag's lifetime never depends on a parent re-render
   // handing us a new callback identity.
   const scrubbingChangeRef = useRef(onScrubbingChange);
+  const flushRef = useRef<() => void>(() => {});
   useEffect(() => {
     scrubbingChangeRef.current = onScrubbingChange;
   });
@@ -113,6 +114,10 @@ export function TimelineScrubber({
     onScrub(tsUnixMs);
   }, [onScrub, placeThumb, range]);
 
+  useEffect(() => {
+    flushRef.current = flush;
+  });
+
   const queueScrub = useCallback(
     (clientY: number) => {
       pendingYRef.current = clientY;
@@ -123,6 +128,9 @@ export function TimelineScrubber({
 
   const endDrag = useCallback(() => {
     if (!draggingRef.current) return;
+    // A quick tap can end before the next animation frame; apply the last
+    // pointer position now so the tap still goes where it was aimed.
+    if (pendingYRef.current !== null) flushRef.current();
     draggingRef.current = false;
     if (frameRef.current !== null) {
       cancelAnimationFrame(frameRef.current);
